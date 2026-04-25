@@ -11,7 +11,7 @@ import (
 )
 
 // FaultInjector creates an HTTP handler that intercepts requests and applies dynamic chaos policies.
-func FaultInjector(cfgManager *config.Manager) func(http.Handler) http.Handler {
+func Middleware(cfgManager *config.Manager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. En güncel konfigürasyonu bellekten güvenle al
