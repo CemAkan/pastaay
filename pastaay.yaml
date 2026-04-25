@@ -1,0 +1,7 @@
+version: 1
+policies:
+  - target: /api/v1/shorten
+    type: http
+    latency_chance: 0.15
+    latency_duration: 800ms
+    error_chance: 0.05
