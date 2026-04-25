@@ -8,16 +8,15 @@ import (
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
-// FaultInjector creates an HTTP handler that intercepts requests and applies dynamic chaos policies.
+// Middleware creates an HTTP handler that intercepts requests and applies chaos policies.
 func Middleware(cfgManager *config.Manager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 1. En güncel konfigürasyonu bellekten güvenle al
 			currentConfig := cfgManager.Get()
 
-			// 2. Gelen isteğin URL'si YAML'daki hedeflerle eşleşiyor mu kontrol et
 			var activePolicy *config.Policy
 			for _, policy := range currentConfig.Policies {
 				if matchPath(r.URL.Path, policy.Target) {
@@ -26,30 +25,35 @@ func Middleware(cfgManager *config.Manager) func(http.Handler) http.Handler {
 				}
 			}
 
-			// 3. Eğer eşleşen bir kural varsa, kaosu başlat!
 			if activePolicy != nil && activePolicy.Type == "http" {
 
-				// Gecikme (Latency) Enjeksiyonu
+				// Latency Injection
 				if rand.Float64() < activePolicy.LatencyChance {
 					log.Printf("Pastaay: Injecting %v latency to %s", activePolicy.LatencyDuration, r.URL.Path)
+
+					// Prometheus sayacını gecikme (latency) etiketiyle 1 artır
+					metrics.InjectedFaultsTotal.WithLabelValues(r.URL.Path, "latency").Inc()
+
 					time.Sleep(activePolicy.LatencyDuration)
 				}
 
-				// Hata (Error) Enjeksiyonu
+				// Error Injection
 				if rand.Float64() < activePolicy.ErrorChance {
 					log.Printf("Pastaay: Injecting 500 Error to %s", r.URL.Path)
+
+					// Prometheus sayacını hata (error) etiketiyle 1 artır
+					metrics.InjectedFaultsTotal.WithLabelValues(r.URL.Path, "error").Inc()
+
 					http.Error(w, "Pastaay: Ritual Fault Injected", http.StatusInternalServerError)
-					return // Hata verdiysek uygulamaya gitmesini engelle
+					return
 				}
 			}
 
-			// 4. Kaos kuralı yoksa veya ihtimaller tutmadıysa isteği uygulamaya geçir
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-// matchPath checks if the incoming request matches the YAML target rule.
 func matchPath(requestPath, targetPath string) bool {
 	if requestPath == targetPath {
 		return true
