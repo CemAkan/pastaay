@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: examples/demo/Dockerfile
+    ports:
+      - "8080:8080"
+      - "2112:2112"
+    volumes:
+      - ./pastaay.yaml:/root/pastaay.yaml
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=pastaay
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=shortener
+    ports:
+      - "5433:5432" # Dışarıya 5433 portundan açıyoruz!
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./examples/demo/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
