@@ -1,10 +1,29 @@
 version: '3.8'
+
 services:
+  app:
+    build:
+      context: .
+      dockerfile: examples/demo/Dockerfile
+    ports:
+      - "8080:8080" # URL Shortener API
+      - "2112:2112" # Metrics Endpoint
+    volumes:
+      # Bind the yaml file to test hot reloading dynamically
+      - ./pastaay.yaml:/root/pastaay.yaml
+
   prometheus:
-    image: prom/prometheus
+    image: prom/prometheus:latest
     ports:
-      - 9090:9090
+      - "9090:9090" # Prometheus Dashboard
+    volumes:
+      - ./examples/demo/prometheus.yml:/etc/prometheus/prometheus.yml
+
   grafana:
-    image: grafana/grafana
+    image: grafana/grafana:latest
     ports:
-      - 3000:3000
+      - "3000:3000" # Grafana Dashboard
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin # Set default password to admin
+    depends_on:
+      - prometheus
