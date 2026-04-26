@@ -1,17 +1,15 @@
-version: '3.8'
-
 services:
   app:
     build:
       context: .
       dockerfile: examples/demo/Dockerfile
     ports:
-      - "8080:8080" # URL Shortener API
-      - "2112:2112" # Metrics Endpoint
+      - "8080:8080"
+      - "2112:2112"
     volumes:
       - ./pastaay.yaml:/root/pastaay.yaml
     depends_on:
-      - db # Wait for database to start
+      - db
 
   db:
     image: postgres:15-alpine
@@ -20,7 +18,7 @@ services:
       - POSTGRES_PASSWORD=secret
       - POSTGRES_DB=shortener
     ports:
-      - "5432:5432"
+      - "5433:5432" # Dışarıya 5433 portundan açıyoruz!
 
   prometheus:
     image: prom/prometheus:latest

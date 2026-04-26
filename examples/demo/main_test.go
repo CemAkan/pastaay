@@ -48,7 +48,7 @@ func TestSQLChaos_RealDatabaseIntegration(t *testing.T) {
 	sqlchaos.Register("pastaay-postgres-test", &pq.Driver{}, cfgManager)
 
 	// 3. Connect to the local Docker database
-	db, err := sql.Open("pastaay-postgres-test", "postgres://pastaay:secret@localhost:5432/shortener?sslmode=disable")
+	db, err := sql.Open("pastaay-postgres-test", "postgres://pastaay:secret@localhost:5433/shortener?sslmode=disable")
 	if err != nil {
 		t.Fatalf("Failed to open database: %v", err)
 	}
