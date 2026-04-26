@@ -21,7 +21,7 @@ type Response struct {
 
 func main() {
 	// 1. Load Initial Configuration
-	cfg, err := config.LoadConfig("../../pastaay.yaml")
+	cfg, err := config.LoadConfig("pastaay.yaml")
 	if err != nil {
 		log.Fatalf("Failed to load initial config: %v", err)
 	}
@@ -29,7 +29,7 @@ func main() {
 	cfgManager := config.NewManager(cfg)
 
 	// 2. Enable Hot Reloading
-	err = config.WatchConfig("../../pastaay.yaml", func(newCfg *config.PastaayConfig) {
+	err = config.WatchConfig("pastaay.yaml", func(newCfg *config.PastaayConfig) {
 		cfgManager.Update(newCfg)
 		log.Println("Demo App: Pastaay configuration updated seamlessly!")
 	})

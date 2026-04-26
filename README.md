@@ -15,7 +15,7 @@
 ## Installation
 
 ```bash
-go get [github.com/CemAkan/pastaay](https://github.com/CemAkan/pastaay)
+go get github.com/CemAkan/pastaay
 ````
 
 ## Quick Start
@@ -43,9 +43,9 @@ package main
 
 import (
 	"net/http"
-	"[github.com/CemAkan/pastaay/pkg/config](https://github.com/CemAkan/pastaay/pkg/config)"
-	"[github.com/CemAkan/pastaay/pkg/ritual](https://github.com/CemAkan/pastaay/pkg/ritual)"
-	"[github.com/CemAkan/pastaay/pkg/metrics](https://github.com/CemAkan/pastaay/pkg/metrics)"
+	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/ritual"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
 func main() {
