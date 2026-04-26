@@ -16,15 +16,16 @@ type WrapperDriver struct {
 // Open implements the driver.Driver interface.
 // It intercepts the connection creation to potentially inject faults.
 func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
-	// 1. Open the actual database connection using the original driver
 	conn, err := d.original.Open(name)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: Wrap this connection to intercept Exec and Query calls.
-	// For now, just return the original, untouched connection.
-	return conn, nil
+	// Wrap the original connection with our agent (WrapperConn)
+	return &WrapperConn{
+		originalConn: conn,
+		cfgManager:   d.cfgManager,
+	}, nil
 }
 
 // Register registers the Pastaay chaos driver with the Go sql package.
