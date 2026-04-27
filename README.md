@@ -4,9 +4,14 @@
   <img src="assets/description.png" alt="Pastaay Description">
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Release-v1.1.0-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
+</p>
 
 ## Features
 
+* **Blast Radius Control (Targeted Chaos):** Apply chaos exclusively to specific users or segments by matching HTTP headers, ensuring safe testing in production-like environments.
 * **Application-Level Chaos:** Inject faults directly into HTTP middleware and SQL drivers.
 * **Hot-Reloading Configuration:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting your application.
 * **Targeted Faults:** Apply chaos to specific HTTP paths or database layers based on probability percentages.
@@ -16,24 +21,28 @@
 
 ```bash
 go get github.com/CemAkan/pastaay
-````
+```
 
 ## Quick Start
 
 **1. Create a `pastaay.yaml` configuration file:**
 
-```yaml
-policies:
-  - type: http
-    target: /api/v1/shorten
-    latency_chance: 0.5
-    latency_duration: 300ms
-    error_chance: 0.1
+## Configuration (pastaay.yaml)
 
-  - type: sql
-    target: database
+Pastaay uses a policy-based configuration. You can define multiple chaos rules and target specific endpoints or headers.
+
+```yaml
+version: 1
+policies:
+  - target: "/api/hello"
+    type: "http"
     latency_chance: 1.0
-    latency_duration: 200ms
+    latency_duration: "2s"
+    error_chance: 0.0
+    # Blast Radius Control: Only applies if the request has these headers
+    match_headers:
+      X-Test-User: "true"
+      X-Device: "ios"
 ```
 
 **2. Integrate into your Go application:**
