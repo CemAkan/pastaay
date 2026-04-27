@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/conf_header.png" alt="Pastaay Logo">
+  <img src="../assets/conf_header.png" alt="Pastaay Logo">
 </p>
 
 The `pastaay.yaml` file is the heart of the chaos engine. It uses a policy-based structure, allowing you to define multiple chaos rules that run concurrently.

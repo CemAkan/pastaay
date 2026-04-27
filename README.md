@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.1.0-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.2.0-blue.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
 </p>
 
