@@ -4,13 +4,14 @@ import (
 	"time"
 )
 
-// Policy defines the chaos injection rules for a specific target endpoint.
+// Policy defines the chaos injection rules and target criteria.
 type Policy struct {
-	Target          string        `yaml:"target"`
-	Type            string        `yaml:"type"`
-	LatencyChance   float64       `yaml:"latency_chance"`
-	LatencyDuration time.Duration `yaml:"latency_duration"`
-	ErrorChance     float64       `yaml:"error_chance"`
+	Target          string            `yaml:"target"`
+	Type            string            `yaml:"type"`
+	LatencyChance   float64           `yaml:"latency_chance"`
+	LatencyDuration time.Duration     `yaml:"latency_duration"`
+	ErrorChance     float64           `yaml:"error_chance"`
+	MatchHeaders    map[string]string `yaml:"match_headers,omitempty"`
 }
 
 // PastaayConfig represents the root structure of the YAML configuration file.
