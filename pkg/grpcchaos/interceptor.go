@@ -72,3 +72,40 @@ func matchMetadata(ctx context.Context, required map[string]string) bool {
 
 	return true
 }
+
+// StreamInterceptor returns a gRPC server interceptor for streaming RPCs.
+func StreamInterceptor(cfgManager *config.Manager) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		currentConfig := cfgManager.Get()
+
+		var activePolicy *config.Policy
+		for _, policy := range currentConfig.Policies {
+			if policy.Type == "grpc" && policy.Target == info.FullMethod {
+				// For streams, the context is fetched from the ServerStream interface
+				if matchMetadata(ss.Context(), policy.MatchHeaders) {
+					p := policy
+					activePolicy = &p
+					break
+				}
+			}
+		}
+
+		if activePolicy != nil {
+			// Latency Injection
+			if activePolicy.LatencyChance > 0 && rand.Float64() < activePolicy.LatencyChance {
+				log.Printf("Pastaay gRPC Stream: Injecting %v latency to %s", activePolicy.LatencyDuration, info.FullMethod)
+				metrics.InjectedFaultsTotal.WithLabelValues(info.FullMethod, "latency").Inc()
+				time.Sleep(activePolicy.LatencyDuration)
+			}
+
+			// Error Injection
+			if activePolicy.ErrorChance > 0 && rand.Float64() < activePolicy.ErrorChance {
+				log.Printf("Pastaay gRPC Stream: Injecting Unavailable error to %s", info.FullMethod)
+				metrics.InjectedFaultsTotal.WithLabelValues(info.FullMethod, "error").Inc()
+				return status.Error(codes.Unavailable, "Pastaay Chaos: Synthetic Stream Fault Injected")
+			}
+		}
+
+		return handler(srv, ss)
+	}
+}
