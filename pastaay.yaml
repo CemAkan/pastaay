@@ -1,9 +1,16 @@
 version: 1
 policies:
-  - target: "/api/hello"
+  - name: "slow-down-http"
+    target: "/api/hello"
     type: "http"
     latency_chance: 1.0
-    latency_duration: "500ms"
+    latency_duration: "2s"
     error_chance: 0.0
+
+  - name: "break-grpc-stream"
+    target: "/service.v1.MyService/LiveChat"
+    type: "grpc"
+    latency_chance: 0.0
+    error_chance: 0.5
     match_headers:
-      X-Test-User: "true"
+      x-test-user: "true"

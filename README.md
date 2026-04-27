@@ -11,10 +11,11 @@
 
 ## Features
 
-* **Blast Radius Control (Targeted Chaos):** Apply chaos exclusively to specific users or segments by matching HTTP headers, ensuring safe testing in production-like environments.
-* **Application-Level Chaos:** Inject faults directly into HTTP middleware and SQL drivers.
+## Features
+
+* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, and **gRPC Interceptors (Unary & Stream)**.
+* **Blast Radius Control (Targeted Chaos):** Apply chaos exclusively to specific users or segments by matching HTTP/gRPC headers.
 * **Hot-Reloading Configuration:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting your application.
-* **Targeted Faults:** Apply chaos to specific HTTP paths or database layers based on probability percentages.
 * **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults.
 
 ## Installation
@@ -34,15 +35,20 @@ Pastaay uses a policy-based configuration. You can define multiple chaos rules a
 ```yaml
 version: 1
 policies:
-  - target: "/api/hello"
+  - name: "slow-down-http"
+    target: "/api/hello"
     type: "http"
     latency_chance: 1.0
     latency_duration: "2s"
     error_chance: 0.0
-    # Blast Radius Control: Only applies if the request has these headers
+
+  - name: "break-grpc-stream"
+    target: "/service.v1.MyService/LiveChat"
+    type: "grpc"
+    latency_chance: 0.0
+    error_chance: 0.5
     match_headers:
-      X-Test-User: "true"
-      X-Device: "ios"
+      x-test-user: "true"
 ```
 
 **2. Integrate into your Go application:**
