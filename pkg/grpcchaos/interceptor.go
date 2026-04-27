@@ -2,19 +2,52 @@ package grpcchaos
 
 import (
 	"context"
+	"log"
+	"math/rand"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/CemAkan/pastaay/pkg/config"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
 // UnaryInterceptor returns a gRPC server interceptor that applies chaos policies.
 func UnaryInterceptor(cfgManager *config.Manager) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		currentConfig := cfgManager.Get()
 
-		// TODO: Chaos logic will be implemented here
+		var activePolicy *config.Policy
+		for _, policy := range currentConfig.Policies {
+			// info.FullMethod contains the gRPC route, e.g., "/service.v1.MyService/MyMethod"
+			if policy.Type == "grpc" && policy.Target == info.FullMethod {
+				if matchMetadata(ctx, policy.MatchHeaders) {
+					p := policy
+					activePolicy = &p
+					break
+				}
+			}
+		}
 
-		// Proceed to the actual RPC handler normally
+		if activePolicy != nil {
+			// Latency Injection
+			if activePolicy.LatencyChance > 0 && rand.Float64() < activePolicy.LatencyChance {
+				log.Printf("Pastaay gRPC: Injecting %v latency to %s", activePolicy.LatencyDuration, info.FullMethod)
+				metrics.InjectedFaultsTotal.WithLabelValues(info.FullMethod, "latency").Inc()
+				time.Sleep(activePolicy.LatencyDuration)
+			}
+
+			// Error Injection
+			if activePolicy.ErrorChance > 0 && rand.Float64() < activePolicy.ErrorChance {
+				log.Printf("Pastaay gRPC: Injecting Unavailable error to %s", info.FullMethod)
+				metrics.InjectedFaultsTotal.WithLabelValues(info.FullMethod, "error").Inc()
+				return nil, status.Error(codes.Unavailable, "Pastaay Chaos: Synthetic Fault Injected")
+			}
+		}
+
 		return handler(ctx, req)
 	}
 }
