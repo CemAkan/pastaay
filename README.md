@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="assets/header.png" alt="Pastaay Logo">
+  <img src="assets/main_header.png" alt="Pastaay Logo">
   <br>
-  <img src="assets/description.png" alt="Pastaay Description">
+  <img src="assets/main_description.png" alt="Pastaay Description">
 </p>
 
 <p align="center">
@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
 </p>
 
-## Features
+---
 
 ## Features
 
@@ -18,19 +18,25 @@
 * **Hot-Reloading Configuration:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting your application.
 * **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults.
 
+---
+
 ## Installation
 
 ```bash
 go get github.com/CemAkan/pastaay
 ```
+---
 
 ## Quick Start
 
 **1. Create a `pastaay.yaml` configuration file:**
 
-## Configuration (pastaay.yaml)
+### Configuration (pastaay.yaml):
 
 Pastaay uses a policy-based configuration. You can define multiple chaos rules and target specific endpoints or headers.
+
+**For a complete list of all supported types (`http`, `sql`, `grpc`) and parameters, please read the [Detailed Configuration Reference](docs/configuration.md).**
+
 
 ```yaml
 version: 1
@@ -83,6 +89,7 @@ func main() {
 	http.ListenAndServe(":8080", chaosHandler)
 }
 ```
+---
 
 ## Running the Demo (Docker)
 
@@ -100,5 +107,5 @@ docker compose up -d
 -----
 
 <p align="center">
-<img src="assets/bottom.png" alt="Pastaay QR Code">
+<img src="assets/main_bottom.png" alt="Pastaay QR Code">
 </p>
