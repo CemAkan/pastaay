@@ -5,14 +5,15 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.3.0-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.4.0-blue.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
 </p>
 
 
 ## Features
 
-* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, gRPC Interceptors, and **Redis Hooks**.
+* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, gRPC Interceptors, and Redis Hooks.
+* **Flexible Fault Injection:** Return custom HTTP Status Codes (e.g., `429`, `418`), custom JSON response bodies, or simulate specific SQL Connection drops.
 * **Blast Radius Control (Targeted Chaos):** Apply chaos exclusively to specific users or segments by matching HTTP/gRPC headers.
 * **Hot-Reloading Configuration:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting your application.
 * **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults.
@@ -39,11 +40,12 @@ Pastaay uses a policy-based configuration. You can define multiple chaos rules a
 ```yaml
 version: 1
 policies:
-  - name: "slow-down-http"
+  - name: "custom-http-failure"
     target: "/api/hello"
     type: "http"
-    latency_chance: 1.0
-    latency_duration: "2s"
+    error_chance: 1.0
+    error_code: 429
+    error_body: '{"error": "Pastaay Chaos: Rate Limit Exceeded"}'
 
   - name: "redis-cache-miss"
     target: "get"
@@ -58,9 +60,9 @@ package main
 
 import (
 	"net/http"
-	"github.com/CemAkan/pastaay/pkg/config"
-	"github.com/CemAkan/pastaay/pkg/ritual"
-	"github.com/CemAkan/pastaay/pkg/metrics"
+	"https://github.com/CemAkan/pastaay/pkg/config"
+	"https://github.com/CemAkan/pastaay/pkg/ritual"
+	"https://github.com/CemAkan/pastaay/pkg/metrics"
 )
 
 func main() {
@@ -87,10 +89,9 @@ func main() {
 
 ## Running the Demo (Docker)
 
-To see Pastaay in action with a complete URL Shortener API, PostgreSQL database, Prometheus, and Grafana:
-
+To see Pastaay in action with a complete URL Shortener API, PostgreSQL database, Redis, Prometheus, and Grafana:
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 * **API:** `http://localhost:8080`
