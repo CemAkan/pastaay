@@ -6,10 +6,19 @@ services:
     ports:
       - "8080:8080"
       - "2112:2112"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - DB_DSN=postgres://pastaay:secret@db:5432/shortener?sslmode=disable
     volumes:
-      - ./pastaay.yaml:/root/pastaay.yaml
+      - ./examples/demo/pastaay.yaml:/root/pastaay.yaml
     depends_on:
       - db
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
 
   db:
     image: postgres:15-alpine
@@ -18,7 +27,7 @@ services:
       - POSTGRES_PASSWORD=secret
       - POSTGRES_DB=shortener
     ports:
-      - "5433:5432" # Dışarıya 5433 portundan açıyoruz!
+      - "5433:5432"
 
   prometheus:
     image: prom/prometheus:latest
