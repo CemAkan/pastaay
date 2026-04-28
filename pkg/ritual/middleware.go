@@ -19,26 +19,44 @@ func Middleware(cfgManager *config.Manager) func(http.Handler) http.Handler {
 
 			var activePolicy *config.Policy
 			for _, policy := range currentConfig.Policies {
-				if matchPath(r.URL.Path, policy.Target) && matchHeaders(r, policy.MatchHeaders) {
+				// We only care about HTTP policies here
+				if policy.Type == "http" && matchPath(r.URL.Path, policy.Target) && matchHeaders(r, policy.MatchHeaders) {
 					p := policy
 					activePolicy = &p
 					break
 				}
 			}
 
-			if activePolicy != nil && activePolicy.Type == "http" {
+			if activePolicy != nil {
 				// Latency Injection
-				if rand.Float64() < activePolicy.LatencyChance {
-					log.Printf("Pastaay: Injecting %v latency to %s", activePolicy.LatencyDuration, r.URL.Path)
+				if activePolicy.LatencyChance > 0 && rand.Float64() < activePolicy.LatencyChance {
+					log.Printf("Pastaay HTTP: Injecting %v latency to %s", activePolicy.LatencyDuration, r.URL.Path)
 					metrics.InjectedFaultsTotal.WithLabelValues(r.URL.Path, "latency").Inc()
 					time.Sleep(activePolicy.LatencyDuration)
 				}
 
 				// Error Injection
-				if rand.Float64() < activePolicy.ErrorChance {
-					log.Printf("Pastaay: Injecting 500 Error to %s", r.URL.Path)
+				if activePolicy.ErrorChance > 0 && rand.Float64() < activePolicy.ErrorChance {
 					metrics.InjectedFaultsTotal.WithLabelValues(r.URL.Path, "error").Inc()
-					http.Error(w, "Pastaay: Ritual Fault Injected", http.StatusInternalServerError)
+
+					// Default HTTP Status Code (Return 500 if not specified)
+					statusCode := activePolicy.ErrorCode
+					if statusCode == 0 {
+						statusCode = http.StatusInternalServerError
+					}
+
+					// Default Error Body (Return generic JSON if not specified)
+					responseBody := activePolicy.ErrorBody
+					if responseBody == "" {
+						responseBody = `{"error": "Pastaay Chaos Injected"}`
+					}
+
+					log.Printf("Pastaay HTTP: Injecting %d error to %s", statusCode, r.URL.Path)
+
+					// Set headers, write custom body, and abort the request
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(statusCode)
+					w.Write([]byte(responseBody))
 					return
 				}
 			}
