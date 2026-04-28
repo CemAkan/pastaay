@@ -6,6 +6,7 @@ import (
 
 // Policy defines the chaos injection rules and target criteria.
 type Policy struct {
+	Name            string            `yaml:"name"`
 	Target          string            `yaml:"target"`
 	Type            string            `yaml:"type"`
 	LatencyChance   float64           `yaml:"latency_chance"`
