@@ -1,16 +1,18 @@
 version: 1
 policies:
-  - name: "slow-down-http"
-    target: "/api/hello"
+  - name: "http-login-slowdown"
     type: "http"
-    latency_chance: 1.0
-    latency_duration: "2s"
-    error_chance: 0.0
+    target: "/api/v1/login"
+    latency_chance: 0.2
+    latency_duration: "1500ms"
 
-  - name: "break-grpc-stream"
-    target: "/service.v1.MyService/LiveChat"
-    type: "grpc"
-    latency_chance: 0.0
+  - name: "sql-global-degradation"
+    type: "sql"
+    target: "database"
+    latency_chance: 0.1
+    latency_duration: "3s"
+
+  - name: "redis-cache-miss-attack"
+    type: "redis"
+    target: "get"
     error_chance: 0.5
-    match_headers:
-      x-test-user: "true"

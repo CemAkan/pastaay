@@ -8,15 +8,15 @@ The `pastaay.yaml` file is the heart of the chaos engine. It uses a policy-based
 
 Each policy in the `policies` list supports the following fields:
 
-| Field | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `name` | `string` | No | A unique identifier for the policy (useful for logging and debugging). |
-| `type` | `string` | **Yes** | The type of chaos target. Supported values: `http`, `sql`, `grpc`. |
-| `target` | `string` | **Yes** | The specific endpoint, database route, or gRPC method to target. |
-| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency. |
-| `latency_duration`| `string` | No | How long to delay the request (e.g., `500ms`, `2s`, `1.5s`). |
-| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault. |
-| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control. |
+| Field | Type | Required | Description                                                               |
+| :--- | :--- | :--- |:--------------------------------------------------------------------------|
+| `name` | `string` | No | A unique identifier for the policy (useful for logging and debugging).    |
+| `type` | `string` | **Yes** | The type of chaos target. Supported values: `http`, `sql`, `grpc`,`redis`. |
+| `target` | `string` | **Yes** | The specific endpoint, database route, or gRPC method to target.          |
+| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency.                            |
+| `latency_duration`| `string` | No | How long to delay the request (e.g., `500ms`, `2s`, `1.5s`).              |
+| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault.            |
+| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control.                                 |
 
 ---
 
@@ -34,6 +34,9 @@ Intercepts database queries at the driver level to simulate slow database connec
 Intercepts both Unary and Streaming gRPC calls to inject latency or `codes.Unavailable` errors.
 * **Target Format:** The Full Method Name (e.g., `/service.v1.MyService/MyMethod`).
 
+### 4. Redis Chaos (`type: "redis"`)
+Intercepts `go-redis/v9` commands to inject latency or simulate Cache Misses (`redis.Nil`). This is extremely useful for testing Cache Stampede scenarios.
+* **Target Format:** The specific Redis command to target (e.g., `"get"`, `"set"`), or use `"all"` to intercept every command.
 ---
 
 ## Blast Radius Control (`match_headers`)
@@ -84,6 +87,12 @@ policies:
     error_chance: 0.5
     match_headers:
       x-client-version: "v1.0.4"
+      
+  # 5. Intercept Redis GET commands and simulate Cache Misses 50% of the time
+  - name: "redis-stampede-test"
+    type: "redis"
+    target: "get"
+    error_chance: 0.5
 ```
 
 ## Hot-Reloading Behavior

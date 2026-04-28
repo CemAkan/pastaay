@@ -1,0 +1,6 @@
+version: 1
+policies:
+  - name: "redis-cache-miss-attack"
+    type: "redis"
+    target: "get"
+    error_chance: 1.0  # 100% chance to simulate Cache Miss, forcing DB hit
