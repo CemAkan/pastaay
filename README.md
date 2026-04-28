@@ -5,19 +5,17 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.2.0-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.3.0-blue.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
 </p>
 
----
 
 ## Features
 
-* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, and **gRPC Interceptors (Unary & Stream)**.
+* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, gRPC Interceptors, and **Redis Hooks**.
 * **Blast Radius Control (Targeted Chaos):** Apply chaos exclusively to specific users or segments by matching HTTP/gRPC headers.
 * **Hot-Reloading Configuration:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting your application.
 * **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults.
-
 ---
 
 ## Installation
@@ -35,7 +33,7 @@ go get github.com/CemAkan/pastaay
 
 Pastaay uses a policy-based configuration. You can define multiple chaos rules and target specific endpoints or headers.
 
-**For a complete list of all supported types (`http`, `sql`, `grpc`) and parameters, please read the [Detailed Configuration Reference](docs/configuration.md).**
+**For a complete list of all supported types (`http`, `sql`, `grpc`,`redis`) and parameters, please read the [Detailed Configuration Reference](docs/configuration.md).**
 
 
 ```yaml
@@ -46,15 +44,11 @@ policies:
     type: "http"
     latency_chance: 1.0
     latency_duration: "2s"
-    error_chance: 0.0
 
-  - name: "break-grpc-stream"
-    target: "/service.v1.MyService/LiveChat"
-    type: "grpc"
-    latency_chance: 0.0
-    error_chance: 0.5
-    match_headers:
-      x-test-user: "true"
+  - name: "redis-cache-miss"
+    target: "get"
+    type: "redis"
+    error_chance: 0.5 # 50% chance to simulate a cache miss (returns redis.Nil)
 ```
 
 **2. Integrate into your Go application:**
