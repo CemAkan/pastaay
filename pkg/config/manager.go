@@ -1,33 +1,33 @@
 package config
 
-import (
-	"sync"
-)
+import "sync"
 
-// Manager handles thread-safe access to the Pastaay configuration.
-// It uses an RWMutex to allow multiple concurrent readers but only one writer.
 type Manager struct {
 	mu  sync.RWMutex
 	cfg *PastaayConfig
 }
 
-// NewManager initializes a new safe configuration manager.
 func NewManager(initialConfig *PastaayConfig) *Manager {
-	return &Manager{
-		cfg: initialConfig,
-	}
+	return &Manager{cfg: initialConfig}
 }
 
-// Get safely returns a pointer to the current configuration.
-// Multiple goroutines can call this simultaneously without blocking each other.
-func (m *Manager) Get() *PastaayConfig {
+func (m *Manager) GetActivePolicies(policyType string) []Policy {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.cfg
+
+	var active []Policy
+	if m.cfg == nil {
+		return active
+	}
+
+	for _, p := range m.cfg.Policies {
+		if p.Type == policyType {
+			active = append(active, p)
+		}
+	}
+	return active
 }
 
-// Update safely replaces the current configuration with a new one.
-// This blocks all readers until the new configuration is fully written to memory.
 func (m *Manager) Update(newCfg *PastaayConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
