@@ -5,7 +5,7 @@ import "time"
 type Policy struct {
 	Name            string            `yaml:"name"`
 	Target          string            `yaml:"target"`
-	Type            string            `yaml:"type"` // http, sql, redis, grpc, mongo
+	Type            string            `yaml:"type"`
 	LatencyChance   float64           `yaml:"latency_chance"`
 	LatencyDuration time.Duration     `yaml:"latency_duration"`
 	ErrorChance     float64           `yaml:"error_chance"`
@@ -16,6 +16,18 @@ type Policy struct {
 }
 
 type PastaayConfig struct {
-	Version  int      `yaml:"version"`
-	Policies []Policy `yaml:"policies"`
+	Version              int                 `yaml:"version"`
+	WarmupDuration       time.Duration       `yaml:"warmup_duration"`
+	EnableDefaultIgnored bool                `yaml:"enable_default_ignored"` // Global protection toggle
+	IgnoredCommands      map[string][]string `yaml:"ignored_commands"`       // Custom user overrides
+	Policies             []Policy            `yaml:"policies"`
+}
+
+// DefaultProtectedCommands contains critical infrastructure commands
+// that Pastaay should not sabotage during startup or migrations.
+var DefaultProtectedCommands = map[string][]string{
+	"sql":   {"CREATE", "ALTER", "DROP", "TRUNCATE"},
+	"mongo": {"create", "createIndexes", "drop", "collMod"},
+	"redis": {"PING", "INFO", "CONFIG"},
+	"grpc":  {"grpc.health.v1.Health"},
 }
