@@ -3,17 +3,25 @@ services:
     build:
       context: .
       dockerfile: examples/demo/Dockerfile
+      network: host
     ports:
       - "8080:8080"
       - "2112:2112"
     environment:
       - REDIS_ADDR=redis:6379
       - DB_DSN=postgres://pastaay:secret@db:5432/shortener?sslmode=disable
+      - MONGO_URI=mongodb://mongo:27017
     volumes:
       - ./examples/demo/pastaay.yaml:/root/pastaay.yaml
     depends_on:
       - db
       - redis
+      - mongo
+
+  mongo:
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
 
   redis:
     image: redis:7-alpine
@@ -35,12 +43,3 @@ services:
       - "9090:9090"
     volumes:
       - ./examples/demo/prometheus.yml:/etc/prometheus/prometheus.yml
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    depends_on:
-      - prometheus

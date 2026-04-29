@@ -1,10 +1,7 @@
 package config
 
-import (
-	"time"
-)
+import "time"
 
-// Policy defines the chaos injection rules and target criteria.
 type Policy struct {
 	Name            string            `yaml:"name"`
 	Target          string            `yaml:"target"`
@@ -15,10 +12,22 @@ type Policy struct {
 	ErrorCode       int               `yaml:"error_code,omitempty"`
 	ErrorBody       string            `yaml:"error_body,omitempty"`
 	MatchHeaders    map[string]string `yaml:"match_headers,omitempty"`
+	DropConnection  bool              `yaml:"drop_connection,omitempty"`
 }
 
-// PastaayConfig represents the root structure of the YAML configuration file.
 type PastaayConfig struct {
-	Version  int      `yaml:"version"`
-	Policies []Policy `yaml:"policies"`
+	Version              int                 `yaml:"version"`
+	WarmupDuration       time.Duration       `yaml:"warmup_duration"`
+	EnableDefaultIgnored bool                `yaml:"enable_default_ignored"` // Global protection toggle
+	IgnoredCommands      map[string][]string `yaml:"ignored_commands"`       // Custom user overrides
+	Policies             []Policy            `yaml:"policies"`
+}
+
+// DefaultProtectedCommands contains critical infrastructure commands
+// that Pastaay should not sabotage during startup or migrations.
+var DefaultProtectedCommands = map[string][]string{
+	"sql":   {"CREATE", "ALTER", "DROP", "TRUNCATE"},
+	"mongo": {"create", "createIndexes", "drop", "collMod"},
+	"redis": {"PING", "INFO", "CONFIG"},
+	"grpc":  {"grpc.health.v1.Health"},
 }

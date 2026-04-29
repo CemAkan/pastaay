@@ -1,120 +1,117 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/grpcchaos"
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/mongochaos"
 	"github.com/CemAkan/pastaay/pkg/redischaos"
 	"github.com/CemAkan/pastaay/pkg/ritual"
 	"github.com/CemAkan/pastaay/pkg/sqlchaos"
 )
 
-type Response struct {
-	Message string `json:"message"`
-	Source  string `json:"source"`
-	Short   string `json:"short_url,omitempty"`
-}
-
-// getEnv reads an environment variable or returns a fallback value (Useful for both Docker and Local setups)
-func getEnv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	return fallback
-}
-
 func main() {
-	// 1. Load Initial Configuration
-	cfg, err := config.LoadConfig("pastaay.yaml")
-	if err != nil {
-		log.Fatalf("Failed to load initial config: %v", err)
-	}
+	// 1. Core: Smart Manager & Hot-Reload
+	cfg, _ := config.LoadConfig("pastaay.yaml")
 	cfgManager := config.NewManager(cfg)
+	config.WatchConfig("pastaay.yaml", cfgManager.Update)
 
-	// 2. Enable Hot Reloading
-	err = config.WatchConfig("pastaay.yaml", func(newCfg *config.PastaayConfig) {
-		cfgManager.Update(newCfg)
-		log.Println("Demo App: Pastaay configuration updated seamlessly!")
-	})
-
-	// 3. Start Metrics Server
+	// 2. Observability: Prometheus Metrics Server
 	go metrics.StartServer(":2112")
 
-	// 4. Redis Client with Pastaay Chaos Hook
-	// Use redis:6379 if running in Docker, otherwise localhost:6379
-	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
+	// 3. Redis: Chaos Network & Command Hooks
 	rdb := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
+		Addr:   getEnv("REDIS_ADDR", "localhost:6379"),
+		Dialer: redischaos.NewChaosDialer(cfgManager),
 	})
 	rdb.AddHook(redischaos.NewChaosHook(cfgManager))
 
-	// 5. Database Setup with Pastaay SQL Chaos Wrapper
-	// Use db:5432 if running in Docker, otherwise localhost:5433
-	dbDSN := getEnv("DB_DSN", "postgres://pastaay:secret@localhost:5433/shortener?sslmode=disable")
+	// 4. SQL: Chaos Driver Integration
 	sqlchaos.Register("pastaay-postgres", &pq.Driver{}, cfgManager)
-	db, err := sql.Open("pastaay-postgres", dbDSN)
-	if err != nil {
-		log.Fatalf("Failed to open database connection: %v", err)
-	}
-	defer db.Close()
+	db, _ := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@localhost:5432/shortener?sslmode=disable"))
 
-	// Wait for the DB to boot up and create the table
-	time.Sleep(3 * time.Second)
-	_, _ = db.Exec("CREATE TABLE IF NOT EXISTS links (id SERIAL PRIMARY KEY, url TEXT)")
+	// SMART MODE TEST: This table creation will NOT be sabotaged thanks to DefaultProtectedCommands!
+	_, _ = db.Exec("CREATE TABLE IF NOT EXISTS pastaay_demo (id SERIAL PRIMARY KEY, note TEXT)")
 
-	// 6. Setup Application Router
+	// 5. MongoDB (v2): Chaos Monitor & Dialer
+	mongoOpts := options.Client().ApplyURI(getEnv("MONGO_URI", "mongodb://localhost:27017"))
+	mongochaos.ApplyChaos(mongoOpts, cfgManager)
+	mClient, _ := mongo.Connect(mongoOpts)
+	defer mClient.Disconnect(context.Background())
+
+	// 6. gRPC: Chaos Interceptors
+	lis, _ := net.Listen("tcp", ":50051")
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(grpcchaos.UnaryInterceptor(cfgManager)),
+		grpc.StreamInterceptor(grpcchaos.StreamInterceptor(cfgManager)),
+	)
+	reflection.Register(s)
+	go s.Serve(lis)
+
+	// 7. HTTP (Ritual): Chaos Middleware
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/shorten", func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
 
-		// CHECK CACHE FIRST (Pastaay might intercept and simulate a Cache Miss)
-		val, err := rdb.Get(ctx, "latest_link").Result()
+	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		// Test Redis
+		_ = rdb.Set(r.Context(), "last_ping", time.Now().String(), 0).Err()
 
-		if err == redis.Nil {
-			log.Println("App: Cache Miss! Hitting database...")
+		// Test SQL
+		_, _ = db.Exec("INSERT INTO pastaay_demo (note) VALUES ('ping received')")
 
-			// Write to database (Pastaay might inject latency or synthetic errors here)
-			_, dbErr := db.Exec("INSERT INTO links (url) VALUES ('http://short.ly/xyz123')")
-			if dbErr != nil {
-				log.Printf("DB Error: %v", dbErr)
-				// FIX: If the database fails, abort the request and return a 500 status code!
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"message": "Internal Server Error: Database failure"}`))
-				return
-			}
+		// Test Mongo
+		_ = mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}}).Err()
 
-			// Write back to cache
-			rdb.Set(ctx, "latest_link", "http://short.ly/xyz123", 1*time.Minute)
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(Response{Message: "Saved and Cached!", Source: "Database", Short: "http://short.ly/xyz123"})
-			return
-
-		} else if err != nil {
-			log.Printf("Redis Error: %v", err)
-		}
-
-		// CACHE HIT (Returns quickly from here if Pastaay doesn't sabotage)
-		log.Println("App: Cache Hit!")
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(Response{Message: "Retrieved from Cache!", Source: "Redis Cache", Short: val})
+		json.NewEncoder(w).Encode(map[string]string{"status": "All systems operational (or sabotaged!)"})
 	})
 
-	// 7. Wrap HTTP Handler with Pastaay HTTP Chaos Middleware
-	chaosHandler := ritual.Middleware(cfgManager)(mux)
+	mux.HandleFunc("/api/v1/shorten", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-	log.Println("Demo App: Server running on :8080 with HTTP, SQL, and Redis Chaos enabled")
-	if err := http.ListenAndServe(":8080", chaosHandler); err != nil {
-		log.Fatalf("Server crashed: %v", err)
+		// SQL Test
+		_, err := db.Exec("INSERT INTO pastaay_demo (note) VALUES ('url shortened')")
+		if err != nil {
+			http.Error(w, "DB Error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Redis Test
+		err = rdb.Set(r.Context(), "short:xyz123", "https://golang.org", 10*time.Minute).Err()
+		if err != nil && err != redis.Nil { // redis.Nil bizim chaos'tan gelebilir
+			log.Printf("Redis Cache Error: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"short_url": "http://localhost:8080/xyz123", "original_url": "https://golang.org"}`))
+	})
+
+	log.Println("Pastaay v1.5 [SMART MODE] FULL-STACK DEMO is live on :8080")
+	log.Fatal(http.ListenAndServe(":8080", ritual.Middleware(cfgManager)(mux)))
+}
+
+func getEnv(k, f string) string {
+	if v, ok := os.LookupEnv(k); ok {
+		return v
 	}
+	return f
 }
