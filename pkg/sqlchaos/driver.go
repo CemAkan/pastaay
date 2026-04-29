@@ -3,36 +3,42 @@ package sqlchaos
 import (
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 
 	"github.com/CemAkan/pastaay/pkg/config"
 )
 
-// WrapperDriver wraps a standard sql.Driver with chaos injection capabilities.
+// WrapperDriver implements the sql.Driver interface to intercept connection attempts.
 type WrapperDriver struct {
 	original   driver.Driver
 	cfgManager *config.Manager
 }
 
-// Open implements the driver.Driver interface.
-// It intercepts the connection creation to potentially inject faults.
+// Open checks for DropConnection policies before establishing a physical DB connection.
 func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
+	// Retrieve dynamic SQL policies
+	policies := d.cfgManager.GetActivePolicies("sql")
+	for _, p := range policies {
+		if p.DropConnection {
+			return nil, fmt.Errorf("[Pastaay-SQL] Chaos: connection rejected by active policy")
+		}
+	}
+
 	conn, err := d.original.Open(name)
 	if err != nil {
 		return nil, err
 	}
 
-	// Wrap the original connection with our agent (WrapperConn)
 	return &WrapperConn{
 		originalConn: conn,
 		cfgManager:   d.cfgManager,
 	}, nil
 }
 
-// Register registers the Pastaay chaos driver with the Go sql package.
-// Users will call this instead of directly registering their normal DB driver.
-func Register(driverName string, originalDriver driver.Driver, cfgManager *config.Manager) {
+// Register facilitates the zero-friction integration of the chaos driver.
+func Register(driverName string, original driver.Driver, mgr *config.Manager) {
 	sql.Register(driverName, &WrapperDriver{
-		original:   originalDriver,
-		cfgManager: cfgManager,
+		original:   original,
+		cfgManager: mgr,
 	})
 }
