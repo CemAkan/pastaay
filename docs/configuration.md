@@ -11,90 +11,93 @@ Each policy in the `policies` list supports the following fields:
 | Field | Type | Required | Description                                                               |
 | :--- | :--- | :--- |:--------------------------------------------------------------------------|
 | `name` | `string` | No | A unique identifier for the policy (useful for logging and debugging).    |
-| `type` | `string` | **Yes** | The type of chaos target. Supported values: `http`, `sql`, `grpc`,`redis`. |
+| `type` | `string` | **Yes** | The type of chaos target. Supported values: `http`, `sql`, `grpc`, `redis`. |
 | `target` | `string` | **Yes** | The specific endpoint, database route, or gRPC method to target.          |
 | `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency.                            |
 | `latency_duration`| `string` | No | How long to delay the request (e.g., `500ms`, `2s`, `1.5s`).              |
 | `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault.            |
+| `error_code` | `int` | No | Custom HTTP Status Code. *(Only applies to `type: http`)*. Defaults to `500`. |
+| `error_body` | `string` | No | Custom response/error message. Behavior varies by `type` (See below). |
 | `match_headers` | `map` | No | Key-value pairs for Blast Radius Control.                                 |
 
 ---
 
-## Supported Types & Targets
+## Target Types & Fault Behavior
+
+How Pastaay interprets `error_chance`, `error_code`, and `error_body` depends entirely on the `type` of the policy.
 
 ### 1. HTTP Chaos (`type: "http"`)
-Injects latency or `500 Internal Server Error` into standard REST/HTTP endpoints.
+Intercepts standard REST/HTTP requests before they reach your handlers.
 * **Target Format:** URL Path (e.g., `/api/v1/users` or `/api/*` for wildcards).
-
+* **Fault Behavior:** Uses `error_code` to set the HTTP Status Code (e.g., 403, 429). If omitted, defaults to 500.
+    * Uses `error_body` to write a custom JSON response. If omitted, returns a generic Pastaay error JSON.
 ### 2. SQL Chaos (`type: "sql"`)
-Intercepts database queries at the driver level to simulate slow database connections.
-* **Target Format:** Currently uses `"database"` to target all queries passing through the wrapped driver. *(Note: Advanced table-level targeting will be available in future releases).*
+Intercepts database queries at the Go `driver` level.
+* **Target Format:** Use `"database"` to target all queries. *(Advanced query targeting coming soon).*
+* **Fault Behavior:** `error_code` is **ignored**.
+    * Uses `error_body` to simulate native database connection errors (e.g., `pq: connection refused` or `deadlock detected`). The wrapper will abort the query and return this string as a native Go `error`.
 
 ### 3. gRPC Chaos (`type: "grpc"`)
-Intercepts both Unary and Streaming gRPC calls to inject latency or `codes.Unavailable` errors.
+Intercepts both Unary and Streaming gRPC calls.
 * **Target Format:** The Full Method Name (e.g., `/service.v1.MyService/MyMethod`).
+* **Fault Behavior:** Aborts the request and returns a `codes.Unavailable` status error. *(Custom gRPC codes via config are planned for future releases).*
 
 ### 4. Redis Chaos (`type: "redis"`)
-Intercepts `go-redis/v9` commands to inject latency or simulate Cache Misses (`redis.Nil`). This is extremely useful for testing Cache Stampede scenarios.
-* **Target Format:** The specific Redis command to target (e.g., `"get"`, `"set"`), or use `"all"` to intercept every command.
+Intercepts `go-redis/v9` commands to test cache resiliency.
+* **Target Format:** Specific command (e.g., `"get"`, `"set"`), or `"all"`.
+* **Fault Behavior:** Simulates a **Cache Miss** by forcing the Redis client to return a `redis.Nil` error. Highly effective for testing Cache Stampede protections and database fallback logic.
+
 ---
 
 ## Blast Radius Control (`match_headers`)
 
-To avoid impacting all users in a production or staging environment, you can use the `match_headers` field. The chaos policy will **only** trigger if the incoming request contains all the specified headers.
+To avoid impacting all users in a production or staging environment, you can restrict chaos using the `match_headers` field. The policy will **only** trigger if the incoming request contains all specified headers.
 
-* **For HTTP:** Matches standard HTTP Request Headers (e.g., `X-Test-User: "true"`).
-* **For gRPC:** Matches gRPC incoming Metadata. **Note:** gRPC metadata keys are automatically converted to lowercase by the gRPC framework (e.g., use `x-test-user`, not `X-Test-User`).
+* **For HTTP:** Matches standard HTTP Headers (e.g., `X-Test-User: "true"`).
+* **For gRPC:** Matches gRPC incoming Metadata. **Note:** gRPC metadata keys are automatically converted to lowercase by the framework (e.g., use `x-test-user`, not `X-Test-User`).
 
 ---
 
 ## Complete Example (The Kitchen Sink)
 
-Here is a full, production-ready example demonstrating how to run HTTP, SQL, and gRPC chaos concurrently using targeted blast radius control:
+A production-ready example demonstrating flexible, targeted chaos across multiple infrastructure layers:
 
 ```yaml
 version: 1
 policies:
-  # 1. Delay normal users on the login endpoint (20% chance)
-  - name: "http-login-slowdown"
+  # 1. Simulate a Rate Limit (HTTP 429) ONLY for iOS users
+  - name: "http-rate-limit-ios"
     type: "http"
     target: "/api/v1/login"
-    latency_chance: 0.2
-    latency_duration: "1500ms"
-    error_chance: 0.0
-
-  # 2. Hard fail the checkout endpoint, BUT ONLY for testers
-  - name: "http-checkout-breakage"
-    type: "http"
-    target: "/api/v1/checkout"
-    latency_chance: 0.0
     error_chance: 1.0
+    error_code: 429
+    error_body: '{"error": "Too Many Requests", "retry_after": 60}'
     match_headers:
-      x-test-user: "true"
+      x-client-os: "ios"
 
-  # 3. Simulate database degradation across the board
-  - name: "sql-global-degradation"
+  # 2. Simulate database connection refused (Hard DB Failure)
+  - name: "sql-connection-drop"
     type: "sql"
     target: "database"
-    latency_chance: 0.1
-    latency_duration: "3s"
+    error_chance: 0.1
+    error_body: "pq: connection to server failed: Connection refused"
 
-  # 4. Break the gRPC Live Chat stream for a specific mobile version
+  # 3. Break the gRPC Live Chat stream
   - name: "grpc-chat-stream-fail"
     type: "grpc"
     target: "/chat.v1.ChatService/ConnectStream"
-    latency_chance: 0.0
     error_chance: 0.5
-    match_headers:
-      x-client-version: "v1.0.4"
       
-  # 5. Intercept Redis GET commands and simulate Cache Misses 50% of the time
+  # 4. Force Cache Misses on Redis GET commands to test DB load
   - name: "redis-stampede-test"
     type: "redis"
     target: "get"
     error_chance: 0.5
 ```
+---
 
 ## Hot-Reloading Behavior
 
-Pastaay watches this file natively. If you modify pastaay.yaml while your application is running, the new policies are loaded into memory instantly without dropping active connections or requiring a restart.
+Pastaay watches this file natively. If you modify `pastaay.yaml` while your application is running, the new policies are loaded into memory instantly without dropping active connections or requiring a restart.
+
+---

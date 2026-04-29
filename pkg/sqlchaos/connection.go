@@ -3,11 +3,13 @@ package sqlchaos
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 	"log"
 	"math/rand"
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
 // WrapperConn wraps a standard database connection to intercept queries.
@@ -16,40 +18,56 @@ type WrapperConn struct {
 	cfgManager   *config.Manager
 }
 
-// injectChaos reads the configuration and applies latency if a database policy exists.
-func (c *WrapperConn) injectChaos() {
+// injectChaos reads the configuration and applies latency or returns a synthetic error.
+func (c *WrapperConn) injectChaos() error {
 	currentConfig := c.cfgManager.Get()
 
 	// Search for SQL chaos policies
 	for _, policy := range currentConfig.Policies {
-		// Apply policies targeting "database"
 		if policy.Type == "sql" && policy.Target == "database" {
-			if rand.Float64() < policy.LatencyChance {
+
+			// Latency Injection
+			if policy.LatencyChance > 0 && rand.Float64() < policy.LatencyChance {
 				log.Printf("Pastaay SQL Chaos: Injecting %v latency to database query", policy.LatencyDuration)
+				metrics.InjectedFaultsTotal.WithLabelValues("database", "latency").Inc()
 				time.Sleep(policy.LatencyDuration)
 			}
-			// Note: Error injection for SQL is more complex, currently simulating only latency.
+
+			// Error Injection
+			if policy.ErrorChance > 0 && rand.Float64() < policy.ErrorChance {
+				errorMsg := policy.ErrorBody
+				if errorMsg == "" {
+					errorMsg = "Pastaay Chaos: Synthetic Database Connection Error"
+				}
+
+				log.Printf("Pastaay SQL Chaos: Injecting database error: %s", errorMsg)
+				metrics.InjectedFaultsTotal.WithLabelValues("database", "error").Inc()
+
+				// Return the synthetic error to abort the real query
+				return errors.New(errorMsg)
+			}
 			break
 		}
 	}
+	return nil
 }
 
 // ExecContext intercepts Exec operations (INSERT, UPDATE, DELETE).
 func (c *WrapperConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	c.injectChaos() // Apply chaos injection
-
-	// Check if the original connection supports ExecContext
+	if err := c.injectChaos(); err != nil {
+		return nil, err
+	}
 	if execer, ok := c.originalConn.(driver.ExecerContext); ok {
 		return execer.ExecContext(ctx, query, args)
 	}
-	return nil, driver.ErrSkip // Fallback to standard library if not supported
+	return nil, driver.ErrSkip
 }
 
 // QueryContext intercepts Query operations (SELECT).
 func (c *WrapperConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	c.injectChaos() // Apply chaos injection
-
-	// Check if the original connection supports QueryContext
+	if err := c.injectChaos(); err != nil {
+		return nil, err
+	}
 	if queryer, ok := c.originalConn.(driver.QueryerContext); ok {
 		return queryer.QueryContext(ctx, query, args)
 	}
