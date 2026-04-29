@@ -38,10 +38,15 @@ func (c *WrapperConn) injectChaos() error {
 	return nil
 }
 
+// Sadece ExecContext ve QueryContext metodlarını şu şekilde güncelle:
+
 func (c *WrapperConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if err := c.injectChaos(); err != nil {
-		return nil, err
+	if !c.cfgManager.IsCommandIgnored("sql", query) {
+		if err := c.injectChaos(); err != nil {
+			return nil, err
+		}
 	}
+
 	if q, ok := c.originalConn.(driver.QueryerContext); ok {
 		return q.QueryContext(ctx, query, args)
 	}
@@ -49,9 +54,12 @@ func (c *WrapperConn) QueryContext(ctx context.Context, query string, args []dri
 }
 
 func (c *WrapperConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	if err := c.injectChaos(); err != nil {
-		return nil, err
+	if !c.cfgManager.IsCommandIgnored("sql", query) {
+		if err := c.injectChaos(); err != nil {
+			return nil, err
+		}
 	}
+
 	if e, ok := c.originalConn.(driver.ExecerContext); ok {
 		return e.ExecContext(ctx, query, args)
 	}
