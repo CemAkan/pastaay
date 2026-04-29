@@ -1,51 +1,98 @@
+
 <p align="center">
-  <img src="../assets/conf_header.png" alt="Pastaay Logo">
+  <img src="../assets/conf_header.png" alt="Configuration Header">
 </p>
 
-The `pastaay.yaml` file is the heart of the chaos engine. It uses a policy-based structure, allowing you to define multiple chaos rules that run concurrently.
+The `pastaay.yaml` file is the heart of the chaos engine. With the introduction of **Smart Mode in v1.5**, the configuration now supports global protection rules alongside dynamic policies.
 
-## Policy Structure
+## Global Settings 
 
-Each policy in the `policies` list supports the following fields:
+These settings govern the overall behavior of the Pastaay engine and protect your application during critical phases.
 
-| Field | Type | Required | Description                                                               |
-| :--- | :--- | :--- |:--------------------------------------------------------------------------|
-| `name` | `string` | No | A unique identifier for the policy (useful for logging and debugging).    |
-| `type` | `string` | **Yes** | The type of chaos target. Supported values: `http`, `sql`, `grpc`, `redis`. |
-| `target` | `string` | **Yes** | The specific endpoint, database route, or gRPC method to target.          |
-| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency.                            |
-| `latency_duration`| `string` | No | How long to delay the request (e.g., `500ms`, `2s`, `1.5s`).              |
-| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault.            |
-| `error_code` | `int` | No | Custom HTTP Status Code. *(Only applies to `type: http`)*. Defaults to `500`. |
-| `error_body` | `string` | No | Custom response/error message. Behavior varies by `type` (See below). |
-| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control.                                 |
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `version` | `int` | **Yes** | Configuration schema version (currently `1`). |
+| `warmup_duration` | `string` | No | Time to wait after boot before injecting any chaos (e.g., `"10s"`). Prevents crashing during container initialization. |
+| `enable_default_ignored` | `bool` | No | Automatically bypasses chaos for critical setup DDLs (e.g., `CREATE`, `DROP`, `createIndexes`). |
+| `ignored_commands` | `map` | No | Custom map of protocols and commands to explicitly protect. |
+
+<br>
+
+---
+
+###  Deep Dive: Customizing `ignored_commands`
+
+The `ignored_commands` field allows you to explicitly protect certain queries or commands from chaos injection. It accepts a `map[string][]string` where the key is the protocol (`sql`, `mongo`, `redis`) and the value is a list of command prefixes.
+
+**Crucial Matching Rules:**
+1. **Case-Insensitive:** Pastaay automatically converts both your YAML rules and the incoming queries to `UPPERCASE` before comparing. `select` matches `SELECT` and `sElEcT`.
+2. **Prefix Matching (Starts With):** Pastaay uses a prefix matching engine (`strings.HasPrefix`). You do not need to write the entire query. If you ignore `"CREATE"`, it will protect `"CREATE TABLE users"`, `"CREATE INDEX..."`, and `"CREATE DATABASE..."`.
+3. **Whitespace Trimming:** Leading and trailing spaces in the incoming query are automatically trimmed before evaluation.
+
+**Complete Map Example:**
+```yaml
+enable_default_ignored: true # Keeps the built-in protections active
+ignored_commands:
+  sql:
+    - "SELECT 1"      # Protects health check pings (e.g., 'SELECT 1 FROM dual')
+    - "EXPLAIN"       # Protects query planners
+    - "PRAGMA"        # Protects SQLite setup commands
+  mongo:
+    - "ping"          # Protects MongoDB health checks
+    - "buildInfo"
+    - "isMaster"
+  redis:
+    - "PING"
+    - "AUTH"          # Never drop authentication handshakes
+```
+*Note: If `enable_default_ignored` is true, your custom `ignored_commands` are merged with Pastaay's internal default list.*
+
+---
+
+##  Policy Structure
+
+Each policy in the `policies` list supports the following fields to precisely target and execute chaos:
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` | No | A unique identifier for the policy (useful for debugging). |
+| `type` | `string` | **Yes** | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`. |
+| `target` | `string` | **Yes** | Endpoint, database route, or command to target (Use `"all"` for global target). |
+| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency. |
+| `latency_duration`| `string` | No | Delay duration (e.g., `500ms`, `2s`). |
+| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault. |
+| `error_code` | `int` | No | Custom HTTP Status Code *(type: http only)*. |
+| `error_body` | `string` | No | Custom response/error message. |
+| `drop_connection`| `bool` | No | **(v1.5+)** Forcefully rejects the physical TCP dial connection *(SQL, Redis, Mongo only)*. |
+| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control. |
+
+<br>
 
 ---
 
 ## Target Types & Fault Behavior
 
-How Pastaay interprets `error_chance`, `error_code`, and `error_body` depends entirely on the `type` of the policy.
+How Pastaay interprets faults depends entirely on the `type` of the policy.
 
 ### 1. HTTP Chaos (`type: "http"`)
-Intercepts standard REST/HTTP requests before they reach your handlers.
 * **Target Format:** URL Path (e.g., `/api/v1/users` or `/api/*` for wildcards).
-* **Fault Behavior:** Uses `error_code` to set the HTTP Status Code (e.g., 403, 429). If omitted, defaults to 500.
-    * Uses `error_body` to write a custom JSON response. If omitted, returns a generic Pastaay error JSON.
+* **Fault Behavior:** Uses `error_code` for HTTP Status. Uses `error_body` for JSON response. Defaults to `500` if omitted.
+
 ### 2. SQL Chaos (`type: "sql"`)
-Intercepts database queries at the Go `driver` level.
-* **Target Format:** Use `"database"` to target all queries. *(Advanced query targeting coming soon).*
-* **Fault Behavior:** `error_code` is **ignored**.
-    * Uses `error_body` to simulate native database connection errors (e.g., `pq: connection refused` or `deadlock detected`). The wrapper will abort the query and return this string as a native Go `error`.
+* **Target Format:** `"database"` for general queries.
+* **Fault Behavior:** Simulates native DB errors using `error_body` (e.g., `pq: connection refused`) or drops physical connections before they are established if `drop_connection` is true.
 
-### 3. gRPC Chaos (`type: "grpc"`)
-Intercepts both Unary and Streaming gRPC calls.
-* **Target Format:** The Full Method Name (e.g., `/service.v1.MyService/MyMethod`).
-* **Fault Behavior:** Aborts the request and returns a `codes.Unavailable` status error. *(Custom gRPC codes via config are planned for future releases).*
+### 3. MongoDB Chaos (`type: "mongo"`)
+* **Target Format:** Specific command (e.g., `"insert"`, `"find"`) or `"all"`.
+* **Fault Behavior:** Injects latency at the event monitor level, or completely drops the physical dialer connection if `drop_connection` is true.
 
-### 4. Redis Chaos (`type: "redis"`)
-Intercepts `go-redis/v9` commands to test cache resiliency.
+### 4. gRPC Chaos (`type: "grpc"`)
+* **Target Format:** Full Method Name (e.g., `/service.v1.MyService/MyMethod`).
+* **Fault Behavior:** Aborts the request returning a `codes.Unavailable` status.
+
+### 5. Redis Chaos (`type: "redis"`)
 * **Target Format:** Specific command (e.g., `"get"`, `"set"`), or `"all"`.
-* **Fault Behavior:** Simulates a **Cache Miss** by forcing the Redis client to return a `redis.Nil` error. Highly effective for testing Cache Stampede protections and database fallback logic.
+* **Fault Behavior:** Simulates a **Cache Miss** by returning a `redis.Nil` error, or uses `drop_connection` to sever the network link.
 
 ---
 
@@ -58,12 +105,17 @@ To avoid impacting all users in a production or staging environment, you can res
 
 ---
 
-## Complete Example (The Kitchen Sink)
+## Complete Example (The v1.5 Kitchen Sink)
 
 A production-ready example demonstrating flexible, targeted chaos across multiple infrastructure layers:
-
 ```yaml
 version: 1
+warmup_duration: "5s"
+enable_default_ignored: true
+ignored_commands:
+  sql:
+    - "SELECT 1"
+
 policies:
   # 1. Simulate a Rate Limit (HTTP 429) ONLY for iOS users
   - name: "http-rate-limit-ios"
@@ -75,29 +127,28 @@ policies:
     match_headers:
       x-client-os: "ios"
 
-  # 2. Simulate database connection refused (Hard DB Failure)
-  - name: "sql-connection-drop"
+  # 2. Hard network drop for MongoDB
+  - name: "mongo-network-failure"
+    type: "mongo"
+    target: "all"
+    drop_connection: true
+
+  # 3. Database lock simulation via latency
+  - name: "sql-deadlock-simulation"
     type: "sql"
     target: "database"
-    error_chance: 0.1
-    error_body: "pq: connection to server failed: Connection refused"
+    latency_chance: 0.1
+    latency_duration: "5s"
 
-  # 3. Break the gRPC Live Chat stream
-  - name: "grpc-chat-stream-fail"
-    type: "grpc"
-    target: "/chat.v1.ChatService/ConnectStream"
-    error_chance: 0.5
-      
-  # 4. Force Cache Misses on Redis GET commands to test DB load
+  # 4. Force Cache Misses on Redis to test DB load (Stampede)
   - name: "redis-stampede-test"
     type: "redis"
     target: "get"
     error_chance: 0.5
 ```
+
 ---
 
 ## Hot-Reloading Behavior
 
-Pastaay watches this file natively. If you modify `pastaay.yaml` while your application is running, the new policies are loaded into memory instantly without dropping active connections or requiring a restart.
-
----
+Pastaay watches this file natively. If you modify `pastaay.yaml` while your application is running, the new policies are loaded into the cache memory instantly without dropping active connections or requiring a restart.
