@@ -24,7 +24,6 @@ func (m *MockConn) ExecContext(ctx context.Context, query string, args []driver.
 
 // TestWrapperConn_InjectsLatency tests if the SQL wrapper successfully intercepts and delays a query.
 func TestWrapperConn_InjectsLatency(t *testing.T) {
-	// 1. Setup a test configuration: 100% chance to inject a 100ms delay for the "database" target.
 	cfg := &config.PastaayConfig{
 		Policies: []config.Policy{
 			{Target: "database", Type: "sql", LatencyChance: 1.0, LatencyDuration: 100 * time.Millisecond},
@@ -32,19 +31,46 @@ func TestWrapperConn_InjectsLatency(t *testing.T) {
 	}
 	manager := config.NewManager(cfg)
 
-	// 2. Wrap our fake connection with the Pastaay WrapperConn
 	wrapper := &WrapperConn{
 		originalConn: &MockConn{},
 		cfgManager:   manager,
 	}
 
-	// 3. Start a timer and execute a fake database query
 	start := time.Now()
 	_, _ = wrapper.ExecContext(context.Background(), "INSERT INTO users (name) VALUES ('cem')", nil)
 	elapsed := time.Since(start)
 
-	// 4. Assert: The elapsed time MUST be greater than or equal to the 100ms we configured.
 	if elapsed < 100*time.Millisecond {
 		t.Errorf("Expected SQL query to be delayed by at least 100ms, but it only took %v", elapsed)
+	}
+}
+
+// TestWrapperConn_InjectsError tests if the SQL wrapper successfully intercepts and aborts a query with an error.
+func TestWrapperConn_InjectsError(t *testing.T) {
+	cfg := &config.PastaayConfig{
+		Policies: []config.Policy{
+			{
+				Target:      "database",
+				Type:        "sql",
+				ErrorChance: 1.0,
+				ErrorBody:   "deadlock detected",
+			},
+		},
+	}
+	manager := config.NewManager(cfg)
+
+	wrapper := &WrapperConn{
+		originalConn: &MockConn{},
+		cfgManager:   manager,
+	}
+
+	_, err := wrapper.ExecContext(context.Background(), "UPDATE users SET active = false", nil)
+
+	if err == nil {
+		t.Fatalf("Expected a synthetic error, got nil")
+	}
+
+	if err.Error() != "deadlock detected" {
+		t.Errorf("Expected error 'deadlock detected', got '%v'", err.Error())
 	}
 }

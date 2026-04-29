@@ -1,6 +1,7 @@
 version: 1
 policies:
-  - name: "redis-cache-miss-attack"
-    type: "redis"
-    target: "get"
-    error_chance: 1.0  # 100% chance to simulate Cache Miss, forcing DB hit
+  - name: "database-outage-simulation"
+    type: "sql"
+    target: "database"
+    error_chance: 1.0
+    error_body: "pq: connection to server at '127.0.0.1', port 5432 failed: Connection refused"

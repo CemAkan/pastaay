@@ -12,6 +12,8 @@ type Policy struct {
 	LatencyChance   float64           `yaml:"latency_chance"`
 	LatencyDuration time.Duration     `yaml:"latency_duration"`
 	ErrorChance     float64           `yaml:"error_chance"`
+	ErrorCode       int               `yaml:"error_code,omitempty"`
+	ErrorBody       string            `yaml:"error_body,omitempty"`
 	MatchHeaders    map[string]string `yaml:"match_headers,omitempty"`
 }
 
