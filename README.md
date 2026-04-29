@@ -113,6 +113,7 @@ func main() {
 
 To see Pastaay in action with a complete URL Shortener API, PostgreSQL database, Redis, Prometheus, and Grafana:
 ```bash
+cd examples/demo
 docker compose up -d --build
 ```
 
