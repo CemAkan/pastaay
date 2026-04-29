@@ -5,18 +5,37 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.4.0-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.5.0-blue.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
 </p>
 
 
 ## Features
 
-* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, gRPC Interceptors, and Redis Hooks.
-* **Flexible Fault Injection:** Return custom HTTP Status Codes (e.g., `429`, `418`), custom JSON response bodies, or simulate specific SQL Connection drops.
-* **Blast Radius Control (Targeted Chaos):** Apply chaos exclusively to specific users or segments by matching HTTP/gRPC headers.
-* **Hot-Reloading Configuration:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting your application.
+* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, gRPC Interceptors, MongoDB (v2) monitors, and Redis Hooks.
+* **Smart Mode (v1.5+):** Intelligent warmup durations and automatic DDL/Setup command protection (e.g., bypassing `CREATE TABLE` or `createIndexes`) to ensure safe application boot under chaos.
+* **Network-Level Sabotage:** Forcefully drop physical TCP connections for databases and caches.
+* **Flexible Fault Injection:** Return custom HTTP Status Codes, JSON bodies, simulate cache misses (`redis.Nil`), or inject synthetic database latency.
+* **Blast Radius Control:** Apply chaos exclusively to specific users or segments by matching HTTP/gRPC headers.
+* **Hot-Reloading Engine:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting.
 * **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults.
+
+---
+
+##  Release History (Changelog)
+
+| Version | Highlights | Impact |
+| :--- | :--- | :--- |
+| **v1.5 (Latest)** | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Optimized Engine:** Map-based caching for zero-latency policy checks.<br>**Mongo v2:** Full native driver support.<br>**Network Sabotage:** Physical TCP `drop_connection` capabilities. | Allows safe DB migrations during chaos. Delivers high-throughput performance with instant hot-reloading. |
+| **v1.0 - v1.4** | HTTP Middleware, Redis Hooks, gRPC Interceptors, SQL Driver Wrapper, YAML Hot-Reloading, and Native Prometheus Metrics. | Established the core chaos engine architecture, baseline protocols, and native observability. |
+
+<br>
+
+---
+## Documentation
+Dive deep into Pastaay's mechanics using our official documentation:
+* [The Configuration Guide](docs/configuration.md) - Learn how to write policies, target endpoints, and control the blast radius.
+* [Architecture & Engine](docs/architecture.md) - Understand how the O(1) Policy Engine achieves zero-latency lookups.
 ---
 
 ## Installation
@@ -34,11 +53,14 @@ go get github.com/CemAkan/pastaay
 
 Pastaay uses a policy-based configuration. You can define multiple chaos rules and target specific endpoints or headers.
 
-**For a complete list of all supported types (`http`, `sql`, `grpc`,`redis`) and parameters, please read the [Detailed Configuration Reference](docs/configuration.md).**
+**For a complete list of all supported types (`http`, `sql`, `grpc`,`redis`,`mongo`) and parameters, please read the [Detailed Configuration Reference](docs/configuration.md).**
 
 
 ```yaml
 version: 1
+warmup_duration: "10s"
+enable_default_ignored: true
+
 policies:
   - name: "custom-http-failure"
     target: "/api/hello"
@@ -47,10 +69,10 @@ policies:
     error_code: 429
     error_body: '{"error": "Pastaay Chaos: Rate Limit Exceeded"}'
 
-  - name: "redis-cache-miss"
-    target: "get"
-    type: "redis"
-    error_chance: 0.5 # 50% chance to simulate a cache miss (returns redis.Nil)
+  - name: "mongo-kill-switch"
+    target: "all"
+    type: "mongo"
+    drop_connection: true
 ```
 
 **2. Integrate into your Go application:**
@@ -60,9 +82,9 @@ package main
 
 import (
 	"net/http"
-	"https://github.com/CemAkan/pastaay/pkg/config"
-	"https://github.com/CemAkan/pastaay/pkg/ritual"
-	"https://github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/ritual"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
 func main() {
@@ -101,6 +123,29 @@ docker compose up -d --build
 
 -----
 
+## Roadmap: The Future of Pastaay
+
+Pastaay is rapidly evolving into a full-fledged enterprise chaos engineering suite. Here is our aggressive roadmap for the upcoming major releases:
+
+| Version | Planned Features | Status        |
+| :--- | :--- |:--------------|
+| **v1.6** | **Message Brokers:** Kafka & RabbitMQ Interceptors for message queue chaos and event dropping. |  In Progress  |
+| **v1.7** | **Resource Sabotage:** CPU Stressors and RAM Bloaters to simulate memory leaks and compute starvation. |  Planned    |
+| **v1.8** | **Advanced Observability:** Distributed Tracing (OpenTelemetry) integration and latency percentile graphing. |  Planned    |
+| **v1.9** | **Cloud & Low-Level:** AWS Fault Injection Simulator (FIS) hooking and eBPF-based packet dropping without code changes. |  Conceptual |
+| **v2.0** | **The Enterprise Suite:** Kubernetes Operator (`pastaay-operator` via CRDs), CLI Tool (`pastaay-cli`), and a real-time Web Dashboard UI. |  Conceptual |
+
+<br>
+
+---
+
+## License
+
+Pastaay is open-sourced software licensed under the [MIT license](LICENSE).
+
+---
+
 <p align="center">
 <img src="assets/main_bottom.png" alt="Pastaay QR Code">
 </p>
+
