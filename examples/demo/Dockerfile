@@ -10,5 +10,5 @@ WORKDIR /root/
 COPY --from=builder /app/pastaay-demo .
 COPY --from=builder /app/examples/demo/pastaay.yaml .
 
-EXPOSE 8080 2112
+EXPOSE 8080 2112 50051
 CMD ["./pastaay-demo"]

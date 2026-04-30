@@ -3,7 +3,8 @@ package grpcchaos
 import (
 	"context"
 	"log"
-	"math/rand"
+	"math/rand/v2"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -15,7 +16,26 @@ import (
 	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
-// UnaryInterceptor evaluates gRPC policies for point-to-point calls.
+type chaosServerStream struct {
+	grpc.ServerStream
+	method     string
+	cfgManager *config.Manager
+}
+
+func (s *chaosServerStream) SendMsg(m interface{}) error {
+	if err := applyGrpcChaos(s.Context(), s.cfgManager, s.method); err != nil {
+		return err
+	}
+	return s.ServerStream.SendMsg(m)
+}
+
+func (s *chaosServerStream) RecvMsg(m interface{}) error {
+	if err := applyGrpcChaos(s.Context(), s.cfgManager, s.method); err != nil {
+		return err
+	}
+	return s.ServerStream.RecvMsg(m)
+}
+
 func UnaryInterceptor(mgr *config.Manager) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		if err := applyGrpcChaos(ctx, mgr, info.FullMethod); err != nil {
@@ -25,13 +45,14 @@ func UnaryInterceptor(mgr *config.Manager) grpc.UnaryServerInterceptor {
 	}
 }
 
-// StreamInterceptor evaluates gRPC policies for streaming RPCs.
 func StreamInterceptor(mgr *config.Manager) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if err := applyGrpcChaos(ss.Context(), mgr, info.FullMethod); err != nil {
-			return err
+		wrapper := &chaosServerStream{
+			ServerStream: ss,
+			method:       info.FullMethod,
+			cfgManager:   mgr,
 		}
-		return handler(srv, ss)
+		return handler(srv, wrapper)
 	}
 }
 
@@ -39,21 +60,35 @@ func applyGrpcChaos(ctx context.Context, mgr *config.Manager, method string) err
 	policies := mgr.GetActivePolicies("grpc")
 
 	for _, p := range policies {
-		if p.Target == method && matchMetadata(ctx, p.MatchHeaders) {
-			// Latency Injection
+		// Case-insensitive (EqualFold)
+		if (strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, method)) && matchMetadata(ctx, p.MatchHeaders) {
 			if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 				log.Printf("[Pastaay-gRPC] Latency: delaying %s by %v", method, p.LatencyDuration)
 				metrics.InjectedFaultsTotal.WithLabelValues(method, "latency").Inc()
-				time.Sleep(p.LatencyDuration)
+
+				timer := time.NewTimer(p.LatencyDuration)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					return ctx.Err()
+				}
+				timer.Stop()
 			}
 
-			// Error Injection
 			if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
-				log.Printf("[Pastaay-gRPC] Error: injecting Unavailable to %s", method)
+				msg := p.ErrorBody
+				if msg == "" {
+					msg = "Pastaay Chaos Injected"
+				}
+
+				grpcCode := codes.Unavailable
+				if p.ErrorCode > 0 {
+					grpcCode = codes.Code(p.ErrorCode)
+				}
 				metrics.InjectedFaultsTotal.WithLabelValues(method, "error").Inc()
-				return status.Error(codes.Unavailable, "Pastaay Chaos Injected")
+				return status.Error(grpcCode, msg)
 			}
-			break
 		}
 	}
 	return nil
@@ -68,7 +103,7 @@ func matchMetadata(ctx context.Context, required map[string]string) bool {
 		return false
 	}
 	for k, v := range required {
-		vals := md.Get(k)
+		vals := md.Get(strings.ToLower(k))
 		if len(vals) == 0 || vals[0] != v {
 			return false
 		}

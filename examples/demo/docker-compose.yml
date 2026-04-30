@@ -7,6 +7,7 @@ services:
     ports:
       - "8080:8080"
       - "2112:2112"
+      - "50051:50051"
     environment:
       - REDIS_ADDR=redis:6379
       - DB_DSN=postgres://pastaay:secret@db:5432/shortener?sslmode=disable

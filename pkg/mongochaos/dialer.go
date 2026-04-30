@@ -4,26 +4,33 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
 )
 
-// ChaosDialer intercepts MongoDB TCP connection attempts.
 type ChaosDialer struct {
 	DefaultDialer *net.Dialer
 	Manager       *config.Manager
 }
 
 func (c *ChaosDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	// Retrieve only 'mongo' type policies from the manager.
 	policies := c.Manager.GetActivePolicies("mongo")
 
 	for _, p := range policies {
-		// If the policy requires dropping the connection, abort here.
-		if p.DropConnection {
+		if p.DropConnection && strings.EqualFold(p.Target, "all") {
 			return nil, errors.New("[Pastaay-Mongo] Chaos: connection forcefully dropped by policy")
 		}
 	}
 
-	return c.DefaultDialer.DialContext(ctx, network, address)
+	dialer := c.DefaultDialer
+	if dialer == nil {
+		dialer = &net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+	}
+
+	return dialer.DialContext(ctx, network, address)
 }

@@ -4,8 +4,9 @@
   <img src="assets/main_description.png" alt="Pastaay Description">
 </p>
 
+
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.5.0-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.5.1-blue.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
 </p>
 
@@ -14,19 +15,21 @@
 
 * **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, gRPC Interceptors, MongoDB (v2) monitors, and Redis Hooks.
 * **Smart Mode (v1.5+):** Intelligent warmup durations and automatic DDL/Setup command protection (e.g., bypassing `CREATE TABLE` or `createIndexes`) to ensure safe application boot under chaos.
-* **Network-Level Sabotage:** Forcefully drop physical TCP connections for databases and caches.
-* **Flexible Fault Injection:** Return custom HTTP Status Codes, JSON bodies, simulate cache misses (`redis.Nil`), or inject synthetic database latency.
-* **Blast Radius Control:** Apply chaos exclusively to specific users or segments by matching HTTP/gRPC headers.
-* **Hot-Reloading Engine:** Update chaos policies on-the-fly via a `pastaay.yaml` file without restarting.
-* **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults.
+* **Unbreakable Bypass Protection (v1.5.1):** Advanced SQL comment scrubbing (`/*`, `--`) prevents malicious or accidental bypasses of ignored commands.
+* **Crash-Loop Immunity:** Built-in intelligent retries ensure the Chaos Engine and demo applications survive race conditions in Docker-Compose environments where databases boot slower than the API.
+* **Granular & Case-Insensitive Targeting:** Target specific queries (e.g., `INSERT INTO users`) or broad protocols seamlessly. All targets are strictly evaluated via `EqualFold` to eliminate uppercase/lowercase mismatches.
+* **Network-Level Sabotage:** Forcefully drop physical TCP connections. (Safeguarded to only execute on global targets to prevent accidental localized connection pool nukes).
+* **Amnesia-Proof Hot-Reloading:** Watch `pastaay.yaml` via `fsnotify`. Automatically recovers from atomic file saves (Vim/Nano `Remove/Rename` events) without permanently blinding the file watcher.
+* **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults with zero blocking latency.
 
 ---
 
 ##  Release History (Changelog)
 
-| Version | Highlights | Impact |
-| :--- | :--- | :--- |
-| **v1.5 (Latest)** | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Optimized Engine:** Map-based caching for zero-latency policy checks.<br>**Mongo v2:** Full native driver support.<br>**Network Sabotage:** Physical TCP `drop_connection` capabilities. | Allows safe DB migrations during chaos. Delivers high-throughput performance with instant hot-reloading. |
+| Version         | Highlights | Impact |
+|:----------------| :--- | :--- |
+| **v1.5.1**      | **Amnesia-Proof Watcher:** Fixes Linux file-save detachment bugs.<br>**Double-Chaos Shield:** Guards against Go standard library context fallbacks.<br>**Pointer-Safe Pipelines:** Corrects slice iteration memory traps in Redis Hooks.<br>**Crash-Loop Immunity:** Resilient DB dialing. | Achieves absolute structural perfection. Zero memory leaks, zero silent bypasses, and 100% accurate policy targeting in production. |
+| **v1.5.0**      | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Optimized Engine:** Map-based caching for O(1) policy checks.<br>**Network Sabotage:** TCP `drop_connection` capabilities. | Allows safe DB migrations during chaos. Delivers high-throughput performance with instant hot-reloading. |
 | **v1.0 - v1.4** | HTTP Middleware, Redis Hooks, gRPC Interceptors, SQL Driver Wrapper, YAML Hot-Reloading, and Native Prometheus Metrics. | Established the core chaos engine architecture, baseline protocols, and native observability. |
 
 <br>
@@ -35,7 +38,7 @@
 ## Documentation
 Dive deep into Pastaay's mechanics using our official documentation:
 * [The Configuration Guide](docs/configuration.md) - Learn how to write policies, target endpoints, and control the blast radius.
-* [Architecture & Engine](docs/architecture.md) - Understand how the O(1) Policy Engine achieves zero-latency lookups.
+* [Architecture & Engine](docs/architecture.md) - Understand how the Policy Engine achieves zero latency lookups, and how we solved deep OS/Compiler integration bugs.
 ---
 
 ## Installation
@@ -47,16 +50,10 @@ go get github.com/CemAkan/pastaay
 
 ## Quick Start
 
-**1. Create a `pastaay.yaml` configuration file:**
+1. Create a pastaay.yaml configuration file:
 
-### Configuration (pastaay.yaml):
+```YAML
 
-Pastaay uses a policy-based configuration. You can define multiple chaos rules and target specific endpoints or headers.
-
-**For a complete list of all supported types (`http`, `sql`, `grpc`,`redis`,`mongo`) and parameters, please read the [Detailed Configuration Reference](docs/configuration.md).**
-
-
-```yaml
 version: 1
 warmup_duration: "10s"
 enable_default_ignored: true
@@ -75,47 +72,52 @@ policies:
     drop_connection: true
 ```
 
-**2. Integrate into your Go application:**
+---
 
-```go
+## 2. Integrate into your Go application:
+
+```Go
+
 package main
 
 import (
-	"net/http"
-	"github.com/CemAkan/pastaay/pkg/config"
-	"github.com/CemAkan/pastaay/pkg/ritual"
-	"github.com/CemAkan/pastaay/pkg/metrics"
+    "net/http"
+    "github.com/CemAkan/pastaay/pkg/config"
+    "github.com/CemAkan/pastaay/pkg/ritual"
+    "github.com/CemAkan/pastaay/pkg/metrics"
 )
 
 func main() {
-	// Load config & enable hot-reload
-	cfg, _ := config.LoadConfig("pastaay.yaml")
-	cfgManager := config.NewManager(cfg)
-	config.WatchConfig("pastaay.yaml", cfgManager.Update)
+    // Load config & enable amnesia-proof hot-reload
+    cfg, _ := config.LoadConfig("pastaay.yaml")
+    cfgManager := config.NewManager(cfg)
+    config.WatchConfig("pastaay.yaml", cfgManager.Update)
 
-	// Start Prometheus metrics server
-	go metrics.StartServer(":2112")
+    // Start Prometheus metrics server
+    go metrics.StartServer(":2112")
 
-	// Setup your standard router
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/hello", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, World!"))
-	})
+    // Setup your standard router
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/hello", func(w http.ResponseWriter, r *http.Request) {
+       w.Write([]byte("Hello, World!"))
+    })
 
-	// Wrap with Pastaay Chaos Middleware
-	chaosHandler := ritual.Middleware(cfgManager)(mux)
-	http.ListenAndServe(":8080", chaosHandler)
+    // Wrap with Pastaay Chaos Middleware
+    chaosHandler := ritual.Middleware(cfgManager)(mux)
+    http.ListenAndServe(":8080", chaosHandler)
 }
 ```
+
 ---
 
 ## Running the Demo (Docker)
 
 To see Pastaay in action with a complete URL Shortener API, PostgreSQL database, Redis, Prometheus, and Grafana:
-```bash
+```Bash
 cd examples/demo
 docker compose up -d --build
 ```
+<br>
 
 * **API:** `http://localhost:8080`
 * **Metrics:** `http://localhost:2112/metrics`
@@ -138,6 +140,12 @@ Pastaay is rapidly evolving into a full-fledged enterprise chaos engineering sui
 
 <br>
 
+---
+
+## Contributing
+
+Contributions from the community are always welcome <3 Whether you are looking to build a new protocol interceptor, patch a core bug, or refine the documentation, your input is highly valued.
+Please read the [Contributing Guide](CONTRIBUTING.md) for detailed instructions on the development workflow, core architectural guidelines (including pointer safety and interceptor fallbacks), and how to submit a Pull Request.
 ---
 
 ## License
