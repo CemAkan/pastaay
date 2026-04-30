@@ -3,11 +3,13 @@ package redischaos
 import (
 	"context"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -19,24 +21,30 @@ func NewChaosHook(mgr *config.Manager) *ChaosHook {
 	return &ChaosHook{mgr: mgr}
 }
 
-// ProcessHook intercepts every Redis command to inject latency or errors.
 func (h *ChaosHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
 		policies := h.mgr.GetActivePolicies("redis")
 
 		for _, p := range policies {
-			// Check if target is 'all' or matches specific command name
-			if p.Target == "all" || p.Target == cmd.Name() {
-
-				// Latency Injection
+			if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, cmd.Name()) {
 				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
-					log.Printf("[Pastaay-Redis] Latency: injecting %v to command %s", p.LatencyDuration, cmd.Name())
-					time.Sleep(p.LatencyDuration)
+					log.Printf("[Pastaay-Redis] Latency: injecting %v to %s", p.LatencyDuration, cmd.Name())
+					metrics.InjectedFaultsTotal.WithLabelValues("redis", "latency").Inc()
+
+					timer := time.NewTimer(p.LatencyDuration)
+					select {
+					case <-timer.C:
+					case <-ctx.Done():
+						timer.Stop()
+						return ctx.Err()
+					}
+					timer.Stop()
 				}
 
-				// Error Injection (Forced Cache Miss)
 				if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
-					return redis.Nil // Simulates a cache miss for resiliency testing
+					log.Printf("[Pastaay-Redis] Error: simulating cache miss for %s", cmd.Name())
+					metrics.InjectedFaultsTotal.WithLabelValues("redis", "error").Inc()
+					return redis.Nil
 				}
 			}
 		}
@@ -45,9 +53,54 @@ func (h *ChaosHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 }
 
 func (h *ChaosHook) DialHook(next redis.DialHook) redis.DialHook {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) { return next(ctx, network, addr) }
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return next(ctx, network, addr)
+	}
 }
 
 func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
-	return func(ctx context.Context, cmds []redis.Cmder) error { return next(ctx, cmds) }
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		policies := h.mgr.GetActivePolicies("redis")
+		latencyApplied := false
+		
+		for i := range cmds {
+			for _, p := range policies {
+				if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, cmds[i].Name()) {
+					if !latencyApplied && p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
+						metrics.InjectedFaultsTotal.WithLabelValues("redis", "latency").Inc()
+						timer := time.NewTimer(p.LatencyDuration)
+						select {
+						case <-timer.C:
+						case <-ctx.Done():
+							timer.Stop()
+							return ctx.Err()
+						}
+						timer.Stop()
+						latencyApplied = true
+					}
+				}
+			}
+		}
+
+		err := next(ctx, cmds)
+
+		var injectedErr error
+		for i := range cmds {
+			for _, p := range policies {
+				if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, cmds[i].Name()) {
+					if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+						metrics.InjectedFaultsTotal.WithLabelValues("redis", "error").Inc()
+						cmds[i].SetErr(redis.Nil)
+						injectedErr = redis.Nil
+					}
+				}
+			}
+		}
+
+		if err == nil && injectedErr != nil {
+			return injectedErr
+		}
+
+		return err
+	}
 }
