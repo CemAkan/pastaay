@@ -1,7 +1,7 @@
 package ritual
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"time"
@@ -17,15 +17,22 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 
 			for _, p := range policies {
 				if matchPath(r.URL.Path, p.Target) && matchHeaders(r, p.MatchHeaders) {
-					// Latency Injection
+
 					if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
-						metrics.InjectedFaultsTotal.WithLabelValues(r.URL.Path, "latency").Inc()
-						time.Sleep(p.LatencyDuration)
+						metrics.InjectedFaultsTotal.WithLabelValues(p.Target, "latency").Inc()
+
+						timer := time.NewTimer(p.LatencyDuration)
+						select {
+						case <-timer.C:
+						case <-r.Context().Done():
+							timer.Stop()
+							return
+						}
+						timer.Stop()
 					}
 
-					// Error Injection
 					if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
-						metrics.InjectedFaultsTotal.WithLabelValues(r.URL.Path, "error").Inc()
+						metrics.InjectedFaultsTotal.WithLabelValues(p.Target, "error").Inc()
 						status := p.ErrorCode
 						if status == 0 {
 							status = http.StatusInternalServerError
@@ -35,7 +42,7 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 						w.Write([]byte(p.ErrorBody))
 						return
 					}
-					break
+
 				}
 			}
 			next.ServeHTTP(w, r)
@@ -44,6 +51,9 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 }
 
 func matchPath(reqPath, targetPath string) bool {
+	if strings.EqualFold(targetPath, "all") {
+		return true
+	}
 	if reqPath == targetPath {
 		return true
 	}
