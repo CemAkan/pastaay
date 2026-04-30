@@ -6,12 +6,11 @@ import (
 	"time"
 )
 
-// Manager handles thread-safe access to the Pastaay configuration.
 type Manager struct {
 	mu            sync.RWMutex
 	cfg           *PastaayConfig
 	typedPolicies map[string][]Policy
-	startTime     time.Time // Added to track Warmup
+	startTime     time.Time
 }
 
 func NewManager(initialConfig *PastaayConfig) *Manager {
@@ -40,7 +39,7 @@ func (m *Manager) GetActivePolicies(policyType string) []Policy {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// 1. Warmup Protection: Return nothing if system is still warming up
+	// Warmup Protection
 	if m.cfg != nil && time.Since(m.startTime) < m.cfg.WarmupDuration {
 		return nil
 	}
@@ -48,7 +47,6 @@ func (m *Manager) GetActivePolicies(policyType string) []Policy {
 	return m.typedPolicies[policyType]
 }
 
-// IsCommandIgnored checks if a specific query/command should bypass chaos injection.
 func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -56,9 +54,33 @@ func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
 		return false
 	}
 
-	cleanCmd := strings.ToUpper(strings.TrimSpace(cmd))
+	cleanCmd := strings.TrimSpace(cmd)
+	if protocol == "sql" {
+		
+		for {
+			prev := cleanCmd
+			if strings.HasPrefix(cleanCmd, "/*") {
+				if endIndex := strings.Index(cleanCmd, "*/"); endIndex != -1 {
+					cleanCmd = strings.TrimSpace(cleanCmd[endIndex+2:])
+				}
+			}
+			if strings.HasPrefix(cleanCmd, "--") {
+				lines := strings.SplitN(cleanCmd, "\n", 2)
+				if len(lines) > 1 {
+					cleanCmd = strings.TrimSpace(lines[1])
+				} else {
+					cleanCmd = ""
+				}
+			}
+			if cleanCmd == prev {
+				break
+			}
+		}
+	}
 
-	// 1. Check Default Protections (if enabled)
+	cleanCmd = strings.ToUpper(cleanCmd)
+	cleanCmd = strings.TrimPrefix(cleanCmd, "/")
+
 	if m.cfg.EnableDefaultIgnored {
 		if list, ok := DefaultProtectedCommands[protocol]; ok {
 			for _, protected := range list {
@@ -69,7 +91,6 @@ func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
 		}
 	}
 
-	// 2. Check Custom User Protections
 	if m.cfg.IgnoredCommands != nil {
 		if customList, ok := m.cfg.IgnoredCommands[protocol]; ok {
 			for _, custom := range customList {

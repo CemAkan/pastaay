@@ -4,22 +4,23 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
 )
 
-// NewChaosDialer returns a dial function that respects Pastaay network drop policies.
-func NewChaosDialer(mgr *config.Manager) func(ctx context.Context, network, addr string) (net.Conn, error) {
+func NewChaosDialer(mgr *config.Manager, baseDialer *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	if baseDialer == nil {
+		baseDialer = &net.Dialer{Timeout: 5 * time.Second}
+	}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// Filter policies by 'redis' type
 		policies := mgr.GetActivePolicies("redis")
 		for _, p := range policies {
-			if p.DropConnection {
+			if p.DropConnection && strings.EqualFold(p.Target, "all") {
 				return nil, errors.New("[Pastaay-Redis] Chaos: TCP connection forcefully dropped")
 			}
 		}
-
-		d := net.Dialer{}
-		return d.DialContext(ctx, network, addr)
+		return baseDialer.DialContext(ctx, network, addr)
 	}
 }
