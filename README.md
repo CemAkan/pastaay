@@ -146,6 +146,7 @@ Pastaay is rapidly evolving into a full-fledged enterprise chaos engineering sui
 
 Contributions from the community are always welcome <3 Whether you are looking to build a new protocol interceptor, patch a core bug, or refine the documentation, your input is highly valued.
 Please read the [Contributing Guide](CONTRIBUTING.md) for detailed instructions on the development workflow, core architectural guidelines (including pointer safety and interceptor fallbacks), and how to submit a Pull Request.
+
 ---
 
 ## License
