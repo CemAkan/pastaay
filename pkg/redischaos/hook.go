@@ -89,7 +89,7 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 						}
 						timer.Stop()
 						latencyApplied = true
-						break // Probability Distortion fix
+						break
 					}
 				}
 			}
@@ -110,9 +110,13 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 						metrics.InjectedFaultsTotal.WithLabelValues("redis", "error").Inc()
 						cmds[i].SetErr(redis.Nil)
 						injectedErr = redis.Nil
-						break // Probability Distortion fix
+						break // brak policy loop
 					}
 				}
+			}
+
+			if injectedErr != nil {
+				break
 			}
 		}
 
