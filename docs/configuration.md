@@ -4,7 +4,7 @@
 
 The `pastaay.yaml` file is the heart of the chaos engine. With the introduction of **Smart Mode in v1.5.1**, the configuration supports global protection rules, granular targeting, and case-insensitive policy matching.
 
-## Global Settings 
+## Global Settings
 
 These settings govern the overall behavior of the Pastaay engine and protect your application during critical phases.
 
@@ -19,28 +19,30 @@ These settings govern the overall behavior of the Pastaay engine and protect you
 
 ---
 
-###  Deep Dive: Customizing `ignored_commands` & Anti-Bypass
+### Deep Dive: Customizing `ignored_commands` & Anti-Bypass
 
-The `ignored_commands` field allows you to explicitly protect certain queries or commands from chaos injection. 
+The `ignored_commands` field allows you to explicitly protect certain queries or commands from chaos injection.
 
 **Crucial Matching Rules:**
 1. **Case-Insensitive:** Pastaay automatically converts both your YAML rules and the incoming queries to `UPPERCASE` before comparing. `select` matches `SELECT` and `sElEcT`.
 2. **Prefix Matching:** Pastaay uses a prefix matching engine. If you ignore `"CREATE"`, it protects `"CREATE TABLE..."`, `"CREATE INDEX..."`, etc.
-3. **Advanced Anti-Bypass Scrubbing (v1.5.1+):** Pastaay strictly scrubs mixed SQL comments (e.g., `/* comment */`, `-- comment`) and whitespaces before evaluation. A query like `/* Bypass Attempt */ CREATE TABLE` will still be correctly identified and protected.
+3. **Advanced Anti-Bypass Scrubbing:** Pastaay strictly scrubs mixed SQL comments (e.g., `/* comment */`, `-- comment`) and whitespaces before evaluation. A query like `/* Bypass Attempt */ CREATE TABLE` will still be correctly identified and protected.
 
 **Complete Map Example:**
 ```yaml
 enable_default_ignored: true
 ignored_commands:
   sql:
-    - "SELECT 1"      # Protects health check pings
+    - "SELECT 1"      # Protects database health check pings
     - "EXPLAIN"       # Protects query planners
   mongo:
-    - "ping"          
+    - "ping"
     - "buildInfo"
   redis:
     - "PING"
-    - "AUTH"          
+    - "AUTH"
+  kafka:
+    - "heartbeat"     # Protects consumer group stability
 ```
 
 ---
@@ -49,18 +51,18 @@ ignored_commands:
 
 Each policy in the `policies` list supports the following fields to precisely target and execute chaos:
 
-| Field | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `name` | `string` | No | A unique identifier for the policy (useful for debugging). |
-| `type` | `string` | **Yes** | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`. |
-| `target` | `string` | **Yes** | Endpoint, route, or specific query to target. **Strictly Case-Insensitive.** |
-| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency. |
-| `latency_duration`| `string` | No | Delay duration (e.g., `500ms`, `2s`). |
-| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault. |
-| `error_code` | `int` | No | Custom HTTP/gRPC Status Code *(type: http/grpc only)*. |
-| `error_body` | `string` | No | Custom response/error message. |
+| Field | Type | Required | Description                                                                                                     |
+| :--- | :--- | :--- |:----------------------------------------------------------------------------------------------------------------|
+| `name` | `string` | No | A unique identifier for the policy (useful for debugging).                                                      |
+| `type` | `string` | **Yes** | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`,`kafka`,`rabbitmq`.                                   |
+| `target` | `string` | **Yes** | Endpoint, route, or specific query to target. **Strictly Case-Insensitive.**                                    |
+| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency.                                                                  |
+| `latency_duration`| `string` | No | Delay duration (e.g., `500ms`, `2s`).                                                                           |
+| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault.                                                  |
+| `error_code` | `int` | No | Custom HTTP/gRPC Status Code *(type: http/grpc only)*.                                                          |
+| `error_body` | `string` | No | Custom response/error message.                                                                                  |
 | `drop_connection`| `bool` | No | Forcefully rejects the TCP dial connection. **Safeguard: Requires `target: "all"` or `"database"` to execute.** |
-| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control. |
+| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control.                                                                       |
 
 <br>
 
@@ -85,11 +87,19 @@ How Pastaay interprets faults depends entirely on the `type` of the policy.
 ### 4. gRPC Chaos (`type: "grpc"`)
 * **Target Format:** Full Method Name (e.g., `/service.v1.MyService/MyMethod`). Evaluated Case-Insensitive.
 * **Fault Behavior:** Aborts the request returning a `codes.Unavailable` status.
+* **Stream RNG Mode:** `stream_roll_mode: "stream"` rolls once per stream and applies at most once per policy; `"message"` rolls per message.
 
 ### 5. Redis Chaos (`type: "redis"`)
 * **Target Format:** Specific command (e.g., `"get"`, `"set"`), or `"all"`.
 * **Fault Behavior:** Simulates a **Cache Miss** by returning a `redis.Nil` error. Respects pipeline sequence (latency strictly applied *before* physical execution).
 
+### 6. Kafka Chaos (`type: "kafka"`)
+* **Target Format:** Kafka Topic Name (e.g., `"user_events"`, `"orders"`), or `"all"`.
+* **Fault Behavior:** `error_chance` forces a synthetic unrecoverable message error. `latency_chance` halts the consumer goroutine securely using context-aware `select` blocks to avoid blocking graceful shutdowns. `drop_connection` explicitly drops the message, bypassing the application logic entirely.
+
+### 7. RabbitMQ Chaos (`type: "rabbitmq"`)
+* **Target Format:** Routing Key, Exchange, or Queue Name (e.g., `"payment.processed"`), or `"all"`.
+* **Fault Behavior:** Mirrors Kafka behavior. Uses zero-allocation header extraction and enforces strict type-assertion on AMQP headers to guarantee the Chaos Engine never triggers a Go runtime panic.
 ---
 
 ## Cascading Rules
@@ -97,4 +107,3 @@ Pastaay supports cascading chaos rules. A single route can be targeted by multip
 
 ## Hot-Reloading Behavior
 Pastaay watches this file natively. If you modify `pastaay.yaml` while your application is running, the new policies are loaded instantly. Pastaay is immune to Linux `Vim/Nano` amnesia (file replace events) and will auto-recover the file watcher dynamically.
-
