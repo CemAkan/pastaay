@@ -1,0 +1,7 @@
+services:
+  app:
+    build:
+      context: ../../
+      dockerfile: examples/visualizer/Dockerfile
+    volumes:
+      - ./:/root/
