@@ -3,13 +3,14 @@ package config
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type Manager struct {
-	mu            sync.RWMutex
-	cfg           *PastaayConfig
-	typedPolicies map[string][]Policy
+	mu            sync.Mutex
+	cfg           atomic.Pointer[PastaayConfig]
+	typedPolicies atomic.Pointer[map[string][]Policy]
 	startTime     time.Time
 }
 
@@ -17,6 +18,10 @@ func NewManager(initialConfig *PastaayConfig) *Manager {
 	m := &Manager{
 		startTime: time.Now(),
 	}
+
+	emptyMap := make(map[string][]Policy)
+	m.typedPolicies.Store(&emptyMap)
+
 	m.Update(initialConfig)
 	return m
 }
@@ -24,7 +29,10 @@ func NewManager(initialConfig *PastaayConfig) *Manager {
 func (m *Manager) Update(newCfg *PastaayConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.cfg = newCfg
+
+	if newCfg != nil {
+		m.cfg.Store(newCfg)
+	}
 
 	cache := make(map[string][]Policy)
 	if newCfg != nil {
@@ -32,19 +40,22 @@ func (m *Manager) Update(newCfg *PastaayConfig) {
 			cache[p.Type] = append(cache[p.Type], p)
 		}
 	}
-	m.typedPolicies = cache
+	m.typedPolicies.Store(&cache)
 }
 
 func (m *Manager) GetActivePolicies(policyType string) []Policy {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	policiesPtr := m.typedPolicies.Load()
+	if policiesPtr == nil {
+		return nil
+	}
+	typed := *policiesPtr
 
-	// Warmup Protection
-	if m.cfg != nil && time.Since(m.startTime) < m.cfg.WarmupDuration {
+	cfg := m.cfg.Load()
+	if cfg != nil && time.Since(m.startTime) < cfg.WarmupDuration {
 		return nil
 	}
 
-	return m.typedPolicies[policyType]
+	return typed[policyType]
 }
 
 // CleanSQLCommand strips comments and whitespace, and converts to uppercase.
@@ -72,15 +83,13 @@ func CleanSQLCommand(cmd string) string {
 	return strings.ToUpper(cleanCmd)
 }
 
-// IsCleanCommandIgnored evaluates already-scrubbed commands to prevent double-allocation.
 func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.cfg == nil {
+	cfg := m.cfg.Load()
+	if cfg == nil {
 		return false
 	}
 
-	if m.cfg.EnableDefaultIgnored {
+	if cfg.EnableDefaultIgnored {
 		if list, ok := DefaultProtectedCommands[protocol]; ok {
 			for _, protected := range list {
 				if strings.HasPrefix(cleanCmd, strings.ToUpper(protected)) {
@@ -90,8 +99,8 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 		}
 	}
 
-	if m.cfg.IgnoredCommands != nil {
-		if customList, ok := m.cfg.IgnoredCommands[protocol]; ok {
+	if cfg.IgnoredCommands != nil {
+		if customList, ok := cfg.IgnoredCommands[protocol]; ok {
 			for _, custom := range customList {
 				if strings.HasPrefix(cleanCmd, strings.ToUpper(custom)) {
 					return true
@@ -103,7 +112,6 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 	return false
 }
 
-// Retained for backward compatibility with other protocols (Redis, Mongo, HTTP, etc.)
 func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
 	var cleanCmd string
 	if protocol == "sql" {
