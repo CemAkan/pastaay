@@ -23,11 +23,13 @@ type PastaayConfig struct {
 	Policies             []Policy            `yaml:"policies"`
 }
 
-// DefaultProtectedCommands contains critical infrastructure commands
-// that Pastaay should not sabotage during startup or migrations.
+// DefaultProtectedCommands contains critical infrastructure commands and internal topics
+// that Pastaay should not sabotage during startup, migrations, or internal broker syncing.
 var DefaultProtectedCommands = map[string][]string{
-	"sql":   {"CREATE", "ALTER", "DROP", "TRUNCATE"},
-	"mongo": {"create", "createIndexes", "drop", "collMod"},
-	"redis": {"PING", "INFO", "CONFIG"},
-	"grpc":  {"grpc.health.v1.Health"},
+	"sql":      {"CREATE", "ALTER", "DROP", "TRUNCATE"},
+	"mongo":    {"create", "createIndexes", "drop", "collMod"},
+	"redis":    {"PING", "INFO", "CONFIG"},
+	"grpc":     {"grpc.health.v1.Health"},
+	"kafka":    {"__consumer_offsets", "_schemas", "__transaction_state"},
+	"rabbitmq": {"amq.", "reply_"},
 }
