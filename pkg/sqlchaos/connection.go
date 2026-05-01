@@ -21,13 +21,16 @@ type WrapperConn struct {
 type WrapperStmt struct {
 	originalStmt driver.Stmt
 	query        string
+	cleanQuery   string
 	cfgManager   *config.Manager
 }
 
-func injectChaos(ctx context.Context, mgr *config.Manager, protocol string, query string) error {
-	policies := mgr.GetActivePolicies(protocol)
-	cleanQuery := strings.ToUpper(strings.TrimSpace(query))
+func applySQLChaos(ctx context.Context, mgr *config.Manager, cleanQuery string) error {
+	if mgr.IsCleanCommandIgnored("sql", cleanQuery) {
+		return nil
+	}
 
+	policies := mgr.GetActivePolicies("sql")
 	for _, p := range policies {
 		targetUpper := strings.ToUpper(p.Target)
 
@@ -59,14 +62,15 @@ func injectChaos(ctx context.Context, mgr *config.Manager, protocol string, quer
 	return nil
 }
 
-//STATEMENT
+// STATEMENT
 
 func (s *WrapperStmt) Exec(args []driver.Value) (driver.Result, error) {
 	if _, ok := s.originalStmt.(driver.StmtExecContext); !ok {
-		if !s.cfgManager.IsCommandIgnored("sql", s.query) {
-			if err := injectChaos(context.Background(), s.cfgManager, "sql", s.query); err != nil {
-				return nil, err
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		// Önbellekten doğrudan cleanQuery paslanıyor!
+		if err := applySQLChaos(ctx, s.cfgManager, s.cleanQuery); err != nil {
+			return nil, err
 		}
 	}
 	return s.originalStmt.Exec(args)
@@ -74,10 +78,10 @@ func (s *WrapperStmt) Exec(args []driver.Value) (driver.Result, error) {
 
 func (s *WrapperStmt) Query(args []driver.Value) (driver.Rows, error) {
 	if _, ok := s.originalStmt.(driver.StmtQueryContext); !ok {
-		if !s.cfgManager.IsCommandIgnored("sql", s.query) {
-			if err := injectChaos(context.Background(), s.cfgManager, "sql", s.query); err != nil {
-				return nil, err
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := applySQLChaos(ctx, s.cfgManager, s.cleanQuery); err != nil {
+			return nil, err
 		}
 	}
 	return s.originalStmt.Query(args)
@@ -85,10 +89,8 @@ func (s *WrapperStmt) Query(args []driver.Value) (driver.Rows, error) {
 
 func (s *WrapperStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	if ec, ok := s.originalStmt.(driver.StmtExecContext); ok {
-		if !s.cfgManager.IsCommandIgnored("sql", s.query) {
-			if err := injectChaos(ctx, s.cfgManager, "sql", s.query); err != nil {
-				return nil, err
-			}
+		if err := applySQLChaos(ctx, s.cfgManager, s.cleanQuery); err != nil {
+			return nil, err
 		}
 		return ec.ExecContext(ctx, args)
 	}
@@ -97,10 +99,8 @@ func (s *WrapperStmt) ExecContext(ctx context.Context, args []driver.NamedValue)
 
 func (s *WrapperStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	if qc, ok := s.originalStmt.(driver.StmtQueryContext); ok {
-		if !s.cfgManager.IsCommandIgnored("sql", s.query) {
-			if err := injectChaos(ctx, s.cfgManager, "sql", s.query); err != nil {
-				return nil, err
-			}
+		if err := applySQLChaos(ctx, s.cfgManager, s.cleanQuery); err != nil {
+			return nil, err
 		}
 		return qc.QueryContext(ctx, args)
 	}
@@ -117,7 +117,9 @@ func (c *WrapperConn) Prepare(query string) (driver.Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &WrapperStmt{originalStmt: stmt, query: query, cfgManager: c.cfgManager}, nil
+	// HAZIRLIK AŞAMASI: Sadece 1 kez temizle ve WrapperStmt içine göm.
+	cleanQuery := config.CleanSQLCommand(query)
+	return &WrapperStmt{originalStmt: stmt, query: query, cleanQuery: cleanQuery, cfgManager: c.cfgManager}, nil
 }
 
 func (c *WrapperConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
@@ -126,17 +128,16 @@ func (c *WrapperConn) PrepareContext(ctx context.Context, query string) (driver.
 		if err != nil {
 			return nil, err
 		}
-		return &WrapperStmt{originalStmt: stmt, query: query, cfgManager: c.cfgManager}, nil
+		cleanQuery := config.CleanSQLCommand(query)
+		return &WrapperStmt{originalStmt: stmt, query: query, cleanQuery: cleanQuery, cfgManager: c.cfgManager}, nil
 	}
 	return c.Prepare(query)
 }
 
 func (c *WrapperConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	if q, ok := c.originalConn.(driver.QueryerContext); ok {
-		if !c.cfgManager.IsCommandIgnored("sql", query) {
-			if err := injectChaos(ctx, c.cfgManager, "sql", query); err != nil {
-				return nil, err
-			}
+		if err := applySQLChaos(ctx, c.cfgManager, config.CleanSQLCommand(query)); err != nil {
+			return nil, err
 		}
 		return q.QueryContext(ctx, query, args)
 	}
@@ -145,10 +146,8 @@ func (c *WrapperConn) QueryContext(ctx context.Context, query string, args []dri
 
 func (c *WrapperConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	if e, ok := c.originalConn.(driver.ExecerContext); ok {
-		if !c.cfgManager.IsCommandIgnored("sql", query) {
-			if err := injectChaos(ctx, c.cfgManager, "sql", query); err != nil {
-				return nil, err
-			}
+		if err := applySQLChaos(ctx, c.cfgManager, config.CleanSQLCommand(query)); err != nil {
+			return nil, err
 		}
 		return e.ExecContext(ctx, query, args)
 	}
@@ -158,17 +157,17 @@ func (c *WrapperConn) ExecContext(ctx context.Context, query string, args []driv
 func (c *WrapperConn) Close() error { return c.originalConn.Close() }
 
 func (c *WrapperConn) Begin() (driver.Tx, error) {
-	if err := injectChaos(context.Background(), c.cfgManager, "sql", ""); err != nil {
+	if err := applySQLChaos(context.Background(), c.cfgManager, ""); err != nil {
 		return nil, err
 	}
 	return c.originalConn.Begin()
 }
 
 func (c *WrapperConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	if err := injectChaos(ctx, c.cfgManager, "sql", ""); err != nil {
-		return nil, err
-	}
 	if bt, ok := c.originalConn.(driver.ConnBeginTx); ok {
+		if err := applySQLChaos(ctx, c.cfgManager, ""); err != nil {
+			return nil, err
+		}
 		return bt.BeginTx(ctx, opts)
 	}
 	return c.Begin()
