@@ -47,39 +47,38 @@ func (m *Manager) GetActivePolicies(policyType string) []Policy {
 	return m.typedPolicies[policyType]
 }
 
-func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
+// CleanSQLCommand strips comments and whitespace, and converts to uppercase.
+func CleanSQLCommand(cmd string) string {
+	cleanCmd := strings.TrimSpace(cmd)
+	for {
+		prev := cleanCmd
+		if strings.HasPrefix(cleanCmd, "/*") {
+			if endIndex := strings.Index(cleanCmd, "*/"); endIndex != -1 {
+				cleanCmd = strings.TrimSpace(cleanCmd[endIndex+2:])
+			}
+		}
+		if strings.HasPrefix(cleanCmd, "--") {
+			lines := strings.SplitN(cleanCmd, "\n", 2)
+			if len(lines) > 1 {
+				cleanCmd = strings.TrimSpace(lines[1])
+			} else {
+				cleanCmd = ""
+			}
+		}
+		if cleanCmd == prev {
+			break
+		}
+	}
+	return strings.ToUpper(cleanCmd)
+}
+
+// IsCleanCommandIgnored evaluates already-scrubbed commands to prevent double-allocation.
+func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.cfg == nil {
 		return false
 	}
-
-	cleanCmd := strings.TrimSpace(cmd)
-	if protocol == "sql" {
-		
-		for {
-			prev := cleanCmd
-			if strings.HasPrefix(cleanCmd, "/*") {
-				if endIndex := strings.Index(cleanCmd, "*/"); endIndex != -1 {
-					cleanCmd = strings.TrimSpace(cleanCmd[endIndex+2:])
-				}
-			}
-			if strings.HasPrefix(cleanCmd, "--") {
-				lines := strings.SplitN(cleanCmd, "\n", 2)
-				if len(lines) > 1 {
-					cleanCmd = strings.TrimSpace(lines[1])
-				} else {
-					cleanCmd = ""
-				}
-			}
-			if cleanCmd == prev {
-				break
-			}
-		}
-	}
-
-	cleanCmd = strings.ToUpper(cleanCmd)
-	cleanCmd = strings.TrimPrefix(cleanCmd, "/")
 
 	if m.cfg.EnableDefaultIgnored {
 		if list, ok := DefaultProtectedCommands[protocol]; ok {
@@ -102,4 +101,16 @@ func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
 	}
 
 	return false
+}
+
+// Retained for backward compatibility with other protocols (Redis, Mongo, HTTP, etc.)
+func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
+	var cleanCmd string
+	if protocol == "sql" {
+		cleanCmd = CleanSQLCommand(cmd)
+	} else {
+		cleanCmd = strings.ToUpper(strings.TrimSpace(cmd))
+		cleanCmd = strings.TrimPrefix(cleanCmd, "/")
+	}
+	return m.IsCleanCommandIgnored(protocol, cleanCmd)
 }
