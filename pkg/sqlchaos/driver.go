@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"strings" // Case-insensitive target kontrolü için
 
 	"github.com/CemAkan/pastaay/pkg/config"
 )
@@ -19,8 +20,11 @@ func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
 	// Retrieve dynamic SQL policies
 	policies := d.cfgManager.GetActivePolicies("sql")
 	for _, p := range policies {
-		if p.DropConnection {
-			return nil, fmt.Errorf("[Pastaay-SQL] Chaos: connection rejected by active policy")
+
+		isGlobal := strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, "database")
+
+		if p.DropConnection && isGlobal {
+			return nil, fmt.Errorf("[Pastaay-SQL] Chaos: connection rejected by active nuclear policy")
 		}
 	}
 
