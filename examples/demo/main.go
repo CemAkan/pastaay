@@ -36,6 +36,10 @@ func (b *brokerAdapter) GetActivePolicies() []config.Policy {
 	return b.mgr.GetActivePolicies(b.protocol)
 }
 
+func (b *brokerAdapter) IsCommandIgnored(protocol string, cmd string) bool {
+	return b.mgr.IsCommandIgnored(protocol, cmd)
+}
+
 func main() {
 	log.Println("[INFO] PASTAAY DEMO STARTING")
 

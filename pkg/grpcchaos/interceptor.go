@@ -57,10 +57,14 @@ func StreamInterceptor(mgr *config.Manager) grpc.StreamServerInterceptor {
 }
 
 func applyGrpcChaos(ctx context.Context, mgr *config.Manager, method string) error {
+	
+	if mgr.IsCommandIgnored("grpc", method) {
+		return nil
+	}
+
 	policies := mgr.GetActivePolicies("grpc")
 
 	for _, p := range policies {
-		// Case-insensitive (EqualFold)
 		if (strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, method)) && matchMetadata(ctx, p.MatchHeaders) {
 			if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 				log.Printf("[Pastaay-gRPC] Latency: delaying %s by %v", method, p.LatencyDuration)

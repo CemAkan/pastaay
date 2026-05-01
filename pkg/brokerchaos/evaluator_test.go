@@ -18,6 +18,10 @@ func (m *mockConfigProvider) GetActivePolicies() []config.Policy {
 	return m.policies
 }
 
+func (m *mockConfigProvider) IsCommandIgnored(protocol string, cmd string) bool {
+	return false
+}
+
 // TestEvaluator_RaceCondition bombards the evaluator with thousands of concurrent requests
 func TestEvaluator_RaceCondition(t *testing.T) {
 	provider := &mockConfigProvider{
