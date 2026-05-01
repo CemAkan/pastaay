@@ -17,6 +17,9 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 	var timer *time.Timer
 	var timerMu sync.Mutex
 
+	var reattachTimer *time.Timer
+	var reattachMu sync.Mutex
+
 	go func() {
 		defer watcher.Close()
 		for {
@@ -27,23 +30,29 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 				}
 
 				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-					log.Println("Pastaay: Config file removed/renamed. Attempting to re-attach watcher...")
+					reattachMu.Lock()
+					if reattachTimer != nil {
+						reattachTimer.Stop()
+					}
 
-					go func(path string) {
+					reattachTimer = time.AfterFunc(100*time.Millisecond, func() {
+						log.Println("Pastaay: Config file removed/renamed. Attempting to re-attach watcher...")
+
 						for i := 0; i < 5; i++ {
 							time.Sleep(1 * time.Second)
-							if err := watcher.Add(path); err == nil {
+							if err := watcher.Add(filePath); err == nil {
 								log.Println("Pastaay: Watcher successfully re-attached.")
 
-								if newCfg, loadErr := LoadConfig(path); loadErr == nil {
+								if newCfg, loadErr := LoadConfig(filePath); loadErr == nil {
 									log.Println("Pastaay: Config force-reloaded after file replacement.")
 									reloadCallback(newCfg)
 								}
 								return
 							}
 						}
-						log.Printf("[ERROR] Pastaay: CRITICAL - Failed to re-attach watcher to %s after 5 retries. Hot-reload is dead.\n", path)
-					}(filePath)
+						log.Printf("[ERROR] Pastaay: CRITICAL - Failed to re-attach watcher to %s after 5 retries. Hot-reload is dead.\n", filePath)
+					})
+					reattachMu.Unlock()
 				}
 
 				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
