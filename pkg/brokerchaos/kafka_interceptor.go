@@ -7,7 +7,7 @@ import (
 	"github.com/IBM/sarama"
 )
 
-// KafkaConsumerMiddleware acts as a shield/chaos-injector before your application processes a Kafka message.
+// KafkaConsumerMiddleware acts as a chaos-injector before your application processes a Kafka message.
 type KafkaConsumerMiddleware struct {
 	evaluator Evaluator
 }
@@ -18,24 +18,23 @@ func NewKafkaConsumerMiddleware(eval Evaluator) *KafkaConsumerMiddleware {
 }
 
 // Intercept evaluates a single Kafka message against active chaos policies.
-// It returns a boolean (drop) indicating if the message should be ignored by the application,
-// and an error if a synthetic fault was injected.
 func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.ConsumerMessage) (drop bool, err error) {
 	if msg == nil {
 		return false, nil
-	}
-
-	// Micro-Optimization: Pre-allocate map capacity to avoid dynamic memory resizing.
-	headers := make(map[string]string, len(msg.Headers))
-	for _, h := range msg.Headers {
-		headers[string(h.Key)] = string(h.Value)
 	}
 
 	msgCtx := &MessageContext{
 		Topic:     msg.Topic,
 		Protocol:  ProtocolKafka,
 		Partition: msg.Partition,
-		Headers:   headers,
+
+		ExtractHeaders: func() map[string]string {
+			headers := make(map[string]string, len(msg.Headers))
+			for _, h := range msg.Headers {
+				headers[string(h.Key)] = string(h.Value)
+			}
+			return headers
+		},
 	}
 
 	// Policy Lookup
@@ -44,10 +43,8 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 	switch action {
 	case ActionDrop:
 		return true, nil
-
 	case ActionError:
 		return true, evalErr
-
 	case ActionDelay:
 		// Context-aware blocking.
 		select {
@@ -56,7 +53,6 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 		case <-ctx.Done():
 			return false, ctx.Err()
 		}
-
 	default:
 		return false, nil
 	}

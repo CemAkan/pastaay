@@ -10,7 +10,6 @@ import (
 	"github.com/CemAkan/pastaay/pkg/config"
 )
 
-// ConfigProvider abstracts the configuration manager.
 type ConfigProvider interface {
 	GetActivePolicies() []config.Policy
 	IsCommandIgnored(protocol string, cmd string) bool
@@ -46,6 +45,9 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 		return ActionPass, 0, nil
 	}
 
+	var extractedHeaders map[string]string
+	headersExtracted := false
+
 	for _, p := range policies {
 		if !strings.EqualFold(p.Type, string(msgCtx.Protocol)) {
 			continue
@@ -59,21 +61,29 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 		}
 
 		if len(p.MatchHeaders) > 0 {
+			if msgCtx.ExtractHeaders == nil {
+				continue
+			}
+
+			if !headersExtracted {
+				extractedHeaders = msgCtx.ExtractHeaders()
+				headersExtracted = true
+			}
+
 			headersMatch := true
 			for k, v := range p.MatchHeaders {
-				if msgCtx.Headers[k] != v {
+				if extractedHeaders[k] != v {
 					headersMatch = false
 					break
 				}
 			}
+
 			if !headersMatch {
 				continue
 			}
 		}
 
-		roll := rand.Float64()
-
-		if p.ErrorChance > 0 && roll < p.ErrorChance {
+		if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 			if p.DropConnection {
 				return ActionDrop, 0, nil
 			}
@@ -85,7 +95,7 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 			return ActionError, 0, errors.New(errMsg)
 		}
 
-		if p.LatencyDuration > 0 {
+		if p.LatencyDuration > 0 && rand.Float64() < p.LatencyChance {
 			return ActionDelay, p.LatencyDuration, nil
 		}
 	}

@@ -7,7 +7,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// RabbitMQMiddleware acts as a chaos-injector for AMQP 0.9.1 message deliveries.
+// RabbitMQMiddleware acts as a chaos-injector for AMQP message deliveries.
 type RabbitMQMiddleware struct {
 	evaluator Evaluator
 }
@@ -24,19 +24,21 @@ func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Deliv
 		return false, nil
 	}
 
-	headers := make(map[string]string, len(delivery.Headers))
-	for k, v := range delivery.Headers {
-		if strVal, ok := v.(string); ok {
-			headers[k] = strVal
-		}
-	}
-
 	// RabbitMQ uses RoutingKey or Exchange as the concept of Topic.
 	// We map RoutingKey to our generic Topic field.
 	msgCtx := &MessageContext{
 		Topic:    delivery.RoutingKey,
 		Protocol: ProtocolRabbitMQ,
-		Headers:  headers,
+
+		ExtractHeaders: func() map[string]string {
+			headers := make(map[string]string, len(delivery.Headers))
+			for k, v := range delivery.Headers {
+				if strVal, ok := v.(string); ok {
+					headers[k] = strVal
+				}
+			}
+			return headers
+		},
 	}
 
 	action, delay, evalErr := m.evaluator.Evaluate(ctx, msgCtx)
@@ -44,10 +46,8 @@ func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Deliv
 	switch action {
 	case ActionDrop:
 		return true, nil
-
 	case ActionError:
 		return true, evalErr
-
 	case ActionDelay:
 		// Context-aware blocking to survive Graceful Shutdowns.
 		select {
@@ -56,7 +56,6 @@ func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Deliv
 		case <-ctx.Done():
 			return false, ctx.Err()
 		}
-
 	default:
 		return false, nil
 	}

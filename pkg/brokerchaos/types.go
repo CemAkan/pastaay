@@ -15,10 +15,10 @@ const (
 
 // MessageContext holds the non-payload metadata of an intercepted message.
 type MessageContext struct {
-	Topic     string
-	Protocol  ProtocolType
-	Partition int32
-	Headers   map[string]string
+	Topic          string
+	Protocol       ProtocolType
+	Partition      int32
+	ExtractHeaders func() map[string]string
 }
 
 // ChaosAction defines the engine's verdict on a specific message.
