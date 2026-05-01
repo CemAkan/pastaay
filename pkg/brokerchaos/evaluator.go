@@ -3,9 +3,8 @@ package brokerchaos
 import (
 	"context"
 	"errors"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
@@ -19,27 +18,22 @@ type ConfigProvider interface {
 // defaultEvaluator is the internal implementation of the Evaluator interface.
 type defaultEvaluator struct {
 	provider ConfigProvider
-	// mu protects the random number generator from concurrent goroutine access.
-	mu  sync.Mutex
-	rng *rand.Rand
 }
 
 // NewEvaluator constructs a highly concurrent and memory-safe policy evaluator.
 func NewEvaluator(provider ConfigProvider) Evaluator {
 	return &defaultEvaluator{
 		provider: provider,
-		// Seed local RNG to avoid global lock contention in math/rand
-		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
 // Evaluate applies the active Pastaay policies to the incoming broker message.
 func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext) (ChaosAction, time.Duration, error) {
-	// Defensive Programming: Never trust the caller. Protect against nil pointers.
+
 	if msgCtx == nil {
 		return ActionPass, 0, nil
 	}
-	
+
 	select {
 	case <-ctx.Done():
 		return ActionPass, 0, ctx.Err()
@@ -65,10 +59,22 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 			continue
 		}
 
-		// 3. Probability Execution
-		e.mu.Lock()
-		roll := e.rng.Float64()
-		e.mu.Unlock()
+		// 3. Header Match (Blast Radius Protection)
+		if len(p.MatchHeaders) > 0 {
+			headersMatch := true
+			for k, v := range p.MatchHeaders {
+				if msgCtx.Headers[k] != v {
+					headersMatch = false
+					break
+				}
+			}
+			if !headersMatch {
+				continue
+			}
+		}
+
+		// 4. Probability Execution
+		roll := rand.Float64()
 
 		// Execute Fault Injection if probability hits
 		if p.ErrorChance > 0 && roll < p.ErrorChance {
@@ -83,7 +89,7 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 			return ActionError, 0, errors.New(errMsg)
 		}
 
-		// 4. Latency Injection Verification
+		// 5. Latency Injection Verification
 		if p.LatencyDuration > 0 {
 			return ActionDelay, p.LatencyDuration, nil
 		}

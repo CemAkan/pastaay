@@ -18,8 +18,7 @@ func (m *mockConfigProvider) GetActivePolicies() []config.Policy {
 	return m.policies
 }
 
-// TestEvaluator_RaceCondition bombards the evaluator with thousands of concurrent
-// requests to ensure the internal RNG Mutex prevents race conditions.
+// TestEvaluator_RaceCondition bombards the evaluator with thousands of concurrent requests
 func TestEvaluator_RaceCondition(t *testing.T) {
 	provider := &mockConfigProvider{
 		policies: []config.Policy{
@@ -40,7 +39,7 @@ func TestEvaluator_RaceCondition(t *testing.T) {
 				Topic:    "critical_topic",
 				Protocol: ProtocolKafka,
 			}
-			// If our sync.Mutex logic is flawed, 'go test -race' will catch it here.
+			// Validates lock-free concurrency under heavy load
 			eval.Evaluate(ctx, msgCtx)
 		}()
 	}
@@ -61,7 +60,7 @@ func BenchmarkEvaluator(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	b.ReportAllocs() // Instructs the benchmark to track memory allocations per operation.
+	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
 		eval.Evaluate(ctx, msgCtx)
