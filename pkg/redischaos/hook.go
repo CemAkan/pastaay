@@ -68,7 +68,7 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 		policies := h.mgr.GetActivePolicies("redis")
 		latencyApplied := false
 
-		// Latency
+		// 1. LATENCY
 		for i := range cmds {
 			if h.mgr.IsCommandIgnored("redis", cmds[i].Name()) {
 				continue
@@ -89,9 +89,13 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 						}
 						timer.Stop()
 						latencyApplied = true
-						break
+						break // Sadece iç döngüyü kırar
 					}
 				}
+			}
+
+			if latencyApplied {
+				break
 			}
 		}
 
@@ -99,7 +103,7 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 
 		var injectedErr error
 
-		// Error
+		// 2. ERROR
 		for i := range cmds {
 			if h.mgr.IsCommandIgnored("redis", cmds[i].Name()) {
 				continue
@@ -110,7 +114,7 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 						metrics.InjectedFaultsTotal.WithLabelValues("redis", "error").Inc()
 						cmds[i].SetErr(redis.Nil)
 						injectedErr = redis.Nil
-						break // brak policy loop
+						break // Policy loop breaker
 					}
 				}
 			}
