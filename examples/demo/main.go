@@ -10,16 +10,16 @@ import (
 	"os"
 	"time"
 
+	"github.com/IBM/sarama"
 	"github.com/lib/pq"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 
+	"github.com/CemAkan/pastaay/pkg/brokerchaos"
 	"github.com/CemAkan/pastaay/pkg/config"
-	"github.com/CemAkan/pastaay/pkg/grpcchaos"
 	"github.com/CemAkan/pastaay/pkg/metrics"
 	"github.com/CemAkan/pastaay/pkg/mongochaos"
 	"github.com/CemAkan/pastaay/pkg/redischaos"
@@ -27,136 +27,217 @@ import (
 	"github.com/CemAkan/pastaay/pkg/sqlchaos"
 )
 
+type brokerAdapter struct {
+	mgr      *config.Manager
+	protocol string
+}
+
+func (b *brokerAdapter) GetActivePolicies() []config.Policy {
+	return b.mgr.GetActivePolicies(b.protocol)
+}
+
 func main() {
-	log.Println("Pastaay Demo Application Starting...")
+	log.Println("[INFO] PASTAAY DEMO STARTING")
 
-	// 1. Core: Smart Manager & Hot-Reload
-	cfg, err := config.LoadConfig("pastaay.yaml")
+	cfgPath := "pastaay.yaml"
+	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
-		log.Fatalf("Fatal: Could not load pastaay.yaml: %v", err)
+		log.Fatalf("[FATAL] CONFIG LOAD ERROR: %v", err)
 	}
-	cfgManager := config.NewManager(cfg)
-	config.WatchConfig("pastaay.yaml", cfgManager.Update)
 
-	// 2. Observability: Prometheus Metrics Server
+	cfgManager := config.NewManager(cfg)
+	config.WatchConfig(cfgPath, cfgManager.Update)
+
 	go metrics.StartServer(":2112")
 
-	// 3. Redis: Chaos Network & Command Hooks
-	baseRedisDialer := &net.Dialer{Timeout: 5 * time.Second}
+	// --- Redis Setup ---
 	rdb := redis.NewClient(&redis.Options{
-		Addr:   getEnv("REDIS_ADDR", "localhost:6379"),
-		Dialer: redischaos.NewChaosDialer(cfgManager, baseRedisDialer),
+		Addr:   getEnv("REDIS_ADDR", "redis:6379"),
+		Dialer: redischaos.NewChaosDialer(cfgManager, &net.Dialer{Timeout: 5 * time.Second}),
 	})
 	rdb.AddHook(redischaos.NewChaosHook(cfgManager))
 
-	// Redis Retry for Docker Compose
-	for i := 0; i < 10; i++ {
-		if err := rdb.Ping(context.Background()).Err(); err == nil {
-			log.Println("Redis Connected Successfully.")
-			break
-		}
-		log.Println("Waiting for Redis...")
-		time.Sleep(2 * time.Second)
-	}
-
-	// 4. SQL: Chaos Driver Integration
+	// --- SQL Setup ---
 	sqlchaos.Register("pastaay-postgres", &pq.Driver{}, cfgManager)
-	db, err := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@localhost:5432/shortener?sslmode=disable"))
-	if err != nil {
-		log.Fatalf("Fatal: Could not open SQL connection: %v", err)
-	}
+	db, _ := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@db:5432/shortener?sslmode=disable"))
 
-	// SQL Retry for Docker Compose
-	for i := 0; i < 10; i++ {
-		if err := db.Ping(); err == nil {
-			log.Println("PostgreSQL Connected Successfully.")
-			break
+	// --- Mongo Setup ---
+	mOpts := options.Client().ApplyURI(getEnv("MONGO_URI", "mongodb://mongo:27017"))
+	mongochaos.ApplyChaos(mOpts, cfgManager)
+	mClient, _ := mongo.Connect(mOpts)
+
+	kafkaEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "kafka"})
+	rabbitEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "rabbitmq"})
+
+	// --- Kafka Setup ---
+	go func() {
+		kafkaAddr := getEnv("KAFKA_ADDR", "redpanda:9092")
+
+		saramaCfg := sarama.NewConfig()
+		saramaCfg.Producer.Return.Successes = true
+
+		var kc sarama.Client
+		var kcErr error
+		for i := 0; i < 15; i++ {
+			kc, kcErr = sarama.NewClient([]string{kafkaAddr}, saramaCfg)
+			if kcErr == nil {
+				break
+			}
+			log.Printf("[WAIT] Waiting for Kafka... (%d/15)", i+1)
+			time.Sleep(2 * time.Second)
 		}
-		log.Println("Waiting for PostgreSQL...")
-		time.Sleep(2 * time.Second)
-	}
-
-	// SQL SMART MODE TEST
-	_, err = db.Exec("CREATE TABLE IF NOT EXISTS pastaay_demo (id SERIAL PRIMARY KEY, note TEXT)")
-	if err != nil {
-		log.Printf("Warning: Failed to create table (Ignore if chaos is active globally): %v", err)
-	}
-
-	// 5. MongoDB (v2): Chaos Monitor & Dialer
-	mongoOpts := options.Client().ApplyURI(getEnv("MONGO_URI", "mongodb://localhost:27017"))
-	mongochaos.ApplyChaos(mongoOpts, cfgManager)
-	mClient, err := mongo.Connect(mongoOpts)
-	if err != nil {
-		log.Fatalf("Fatal: Could not connect to MongoDB: %v", err)
-	}
-	defer mClient.Disconnect(context.Background())
-
-	// Mongo retry for Docker Compose
-	for i := 0; i < 10; i++ {
-		if err := mClient.Ping(context.Background(), nil); err == nil {
-			log.Println("MongoDB Connected Successfully.")
-			break
-		}
-		log.Println("Waiting for MongoDB...")
-		time.Sleep(2 * time.Second)
-	}
-
-	// MONGO SMART MODE TEST: 'createIndexes'
-	_, err = mClient.Database("demo").Collection("logs").Indexes().CreateOne(context.Background(), mongo.IndexModel{
-		Keys: bson.D{{Key: "timestamp", Value: 1}},
-	})
-	if err != nil {
-		log.Printf("Warning: Failed to create Mongo Index: %v", err)
-	}
-
-	// 6. gRPC: Chaos Interceptors
-	lis, err := net.Listen("tcp", ":50051")
-	if err != nil {
-		log.Fatalf("Fatal: Failed to listen on gRPC port: %v", err)
-	}
-	s := grpc.NewServer(
-		grpc.UnaryInterceptor(grpcchaos.UnaryInterceptor(cfgManager)),
-		grpc.StreamInterceptor(grpcchaos.StreamInterceptor(cfgManager)),
-	)
-	reflection.Register(s)
-	go s.Serve(lis)
-	log.Println("gRPC Server listening on :50051")
-
-	// 7. HTTP (Ritual): Chaos Middleware
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
-		_ = rdb.Set(r.Context(), "last_ping", time.Now().String(), 0).Err()
-		_, _ = db.Exec("INSERT INTO pastaay_demo (note) VALUES ('ping received')")
-		_ = mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}}).Err()
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "Operational"})
-	})
-
-	mux.HandleFunc("/api/v1/shorten", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		if kcErr != nil {
+			log.Printf("[ERROR] Kafka unavailable, skipping: %v", kcErr)
 			return
 		}
 
-		_, err := db.Exec("INSERT INTO pastaay_demo (note) VALUES ('url shortened')")
+		prod, err := sarama.NewSyncProducerFromClient(kc)
 		if err != nil {
-			http.Error(w, "DB Error: "+err.Error(), http.StatusInternalServerError)
+			log.Printf("[ERROR] Kafka producer error: %v", err)
 			return
 		}
 
-		err = rdb.Set(r.Context(), "short:xyz123", "https://golang.org", 10*time.Minute).Err()
-		if err != nil && err != redis.Nil {
-			log.Printf("Redis Cache Error: %v", err)
+		cons, err := sarama.NewConsumerFromClient(kc)
+		if err != nil {
+			log.Printf("[ERROR] Kafka consumer error: %v", err)
+			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"short_url": "http://localhost:8080/xyz123", "original_url": "https://golang.org"}`))
+		pc, err := cons.ConsumePartition("events.stream", 0, sarama.OffsetNewest)
+		if err != nil {
+			log.Printf("[ERROR] Kafka partition error: %v", err)
+			return
+		}
+
+		mid := brokerchaos.NewKafkaConsumerMiddleware(kafkaEval)
+
+		// Dummy Producer
+		go func() {
+			for {
+				_, _, err := prod.SendMessage(&sarama.ProducerMessage{Topic: "events.stream", Value: sarama.StringEncoder("payload")})
+				if err != nil {
+					log.Printf("[ERROR] Producer send failed: %v", err)
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}()
+
+		// Chaos Consumer
+		for m := range pc.Messages() {
+			drp, _ := mid.Intercept(context.Background(), m)
+			if drp {
+				log.Printf("[CHAOS] [KAFKA] Event Dropped")
+			} else {
+				log.Printf("[OK] [KAFKA] Processed Cleanly")
+			}
+		}
+	}()
+
+	// --- RabbitMQ Setup ---
+	go func() {
+		rabbitURL := getEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+		var conn *amqp.Connection
+		var amqpErr error
+		for i := 0; i < 15; i++ {
+			conn, amqpErr = amqp.Dial(rabbitURL)
+			if amqpErr == nil {
+				break
+			}
+			log.Printf("[WAIT] Waiting for RabbitMQ... (%d/15)", i+1)
+			time.Sleep(2 * time.Second)
+		}
+		if amqpErr != nil {
+			log.Printf("[ERROR] RabbitMQ unavailable, skipping: %v", amqpErr)
+			return
+		}
+
+		ch, err := conn.Channel()
+		if err != nil {
+			log.Printf("[ERROR] RabbitMQ channel error: %v", err)
+			return
+		}
+
+		q, err := ch.QueueDeclare("chaos.queue", false, false, false, false, nil)
+		if err != nil {
+			log.Printf("[ERROR] RabbitMQ queue error: %v", err)
+			return
+		}
+
+		msgs, err := ch.Consume(q.Name, "", true, false, false, false, nil)
+		if err != nil {
+			log.Printf("[ERROR] RabbitMQ consume error: %v", err)
+			return
+		}
+
+		mid := brokerchaos.NewRabbitMQMiddleware(rabbitEval)
+
+		// Dummy Publisher
+		go func() {
+			for {
+				err := ch.PublishWithContext(context.Background(), "", q.Name, false, false, amqp.Publishing{Body: []byte("payload")})
+				if err != nil {
+					log.Printf("[ERROR] RabbitMQ publish failed: %v", err)
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}()
+
+		// Chaos Consumer
+		for d := range msgs {
+			drp, _ := mid.Intercept(context.Background(), &d)
+			if drp {
+				log.Printf("[CHAOS] [RABBITMQ] Event Dropped")
+			} else {
+				log.Printf("[OK] [RABBITMQ] Processed Cleanly")
+			}
+		}
+	}()
+
+	// --- HTTP API ---
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
+		// Mongo Ping
+		if err := mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}}).Err(); err != nil {
+			log.Printf("[CHAOS] [MONGO] Connection/Command failed: %v", err)
+		} else {
+			log.Printf("[OK] [MONGO] Ping successful")
+		}
+
+		// Redis Ping
+		if err := rdb.Ping(r.Context()).Err(); err != nil {
+			log.Printf("[CHAOS] [REDIS] Cache Miss or Error: %v", err)
+		} else {
+			log.Printf("[OK] [REDIS] Ping successful")
+		}
+
+		// SQL Ping
+		if err := db.PingContext(r.Context()); err != nil {
+			log.Printf("[CHAOS] [SQL] Query failed: %v", err)
+		} else {
+			log.Printf("[OK] [SQL] Ping successful")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "PONG"})
 	})
 
-	log.Println("Pastaay v1.5.1 [GOD MODE FINISHED] is live on :8080")
+	// --- Dummy HTTP Traffic Generator ---
+	go func() {
+		time.Sleep(5 * time.Second) // Server'ın kalkmasını bekle
+		client := &http.Client{Timeout: 2 * time.Second}
+		for {
+			resp, err := client.Get("http://localhost:8080/api/v1/ping")
+			if err != nil {
+				log.Printf("[CHAOS] [HTTP] API Request failed: %v", err)
+			} else {
+				log.Printf("[OK] [HTTP] API Status: %d", resp.StatusCode)
+				resp.Body.Close()
+			}
+			time.Sleep(3 * time.Second)
+		}
+	}()
+
+	log.Println("[INFO] Pastaay Integration Demo is LIVE on :8080")
 	log.Fatal(http.ListenAndServe(":8080", ritual.Middleware(cfgManager)(mux)))
 }
 
