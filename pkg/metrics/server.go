@@ -18,7 +18,7 @@ func StartServer(port string) {
 	log.Printf("Pastaay: Metrics server listening on %s/metrics\n", port)
 
 	// Start the HTTP server
-	if err := http.ListenAndServe(port, mux); err != nil {
-		log.Fatalf("Pastaay: Failed to start metrics server: %v", err)
+	if err := http.ListenAndServe(port, mux); err != nil && err != http.ErrServerClosed {
+		log.Printf("[ERROR] Pastaay: Failed to start metrics server on %s (Port in use?). Metrics disabled: %v\n", port, err)
 	}
 }
