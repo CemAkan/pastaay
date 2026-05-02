@@ -1,48 +1,86 @@
 package sqlchaos
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
-	"fmt"
-	"strings" // Case-insensitive target kontrolü için
+	"errors"
+	"math/rand/v2"
+	"strings"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
-// WrapperDriver implements the sql.Driver interface to intercept connection attempts.
 type WrapperDriver struct {
 	original   driver.Driver
 	cfgManager *config.Manager
 }
+type WrapperConnector struct {
+	original   driver.Connector
+	cfgManager *config.Manager
+}
+type fallbackConnector struct {
+	driver *WrapperDriver
+	name   string
+}
 
-// Open checks for DropConnection policies before establishing a physical DB connection.
-func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
-	// Retrieve dynamic SQL policies
-	policies := d.cfgManager.GetActivePolicies("sql")
-	for _, p := range policies {
-
-		isGlobal := strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, "database")
-
-		if p.DropConnection && isGlobal {
-			return nil, fmt.Errorf("[Pastaay-SQL] Chaos: connection rejected by active nuclear policy")
-		}
+func (c *WrapperConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	if err := applyConnectionChaos(c.cfgManager); err != nil {
+		return nil, err
 	}
+	conn, err := c.original.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &WrapperConn{originalConn: conn, cfgManager: c.cfgManager}, nil
+}
 
+func (c *WrapperConnector) Driver() driver.Driver { return c.original.Driver() }
+func (c *fallbackConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	return c.driver.Open(c.name)
+}
+func (c *fallbackConnector) Driver() driver.Driver { return c.driver }
+
+func (d *WrapperDriver) OpenConnector(name string) (driver.Connector, error) {
+	if dc, ok := d.original.(driver.DriverContext); ok {
+		connector, err := dc.OpenConnector(name)
+		if err != nil {
+			return nil, err
+		}
+		return &WrapperConnector{original: connector, cfgManager: d.cfgManager}, nil
+	}
+	return &fallbackConnector{driver: d, name: name}, nil
+}
+
+func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
+	if err := applyConnectionChaos(d.cfgManager); err != nil {
+		return nil, err
+	}
 	conn, err := d.original.Open(name)
 	if err != nil {
 		return nil, err
 	}
-
-	return &WrapperConn{
-		originalConn: conn,
-		cfgManager:   d.cfgManager,
-	}, nil
+	return &WrapperConn{originalConn: conn, cfgManager: d.cfgManager}, nil
 }
 
-// Register facilitates the zero-friction integration of the chaos driver.
+func applyConnectionChaos(mgr *config.Manager) error {
+	policies := mgr.GetActivePolicies("sql")
+	for _, p := range policies {
+		if p.DropConnection && (strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, "database")) {
+			chance := p.ErrorChance
+			if chance <= 0 {
+				chance = 1.0
+			}
+			if rand.Float64() < chance {
+				metrics.InjectedFaultsTotal.WithLabelValues("sql:"+p.Target, "drop").Inc()
+				return errors.New("[Pastaay-SQL] Chaos: TCP connection forcefully dropped")
+			}
+		}
+	}
+	return nil
+}
+
 func Register(driverName string, original driver.Driver, mgr *config.Manager) {
-	sql.Register(driverName, &WrapperDriver{
-		original:   original,
-		cfgManager: mgr,
-	})
+	sql.Register(driverName, &WrapperDriver{original: original, cfgManager: mgr})
 }
