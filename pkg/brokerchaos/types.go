@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// ProtocolType defines the target message broker system.
 type ProtocolType string
 
 const (
@@ -13,25 +12,13 @@ const (
 	ProtocolRabbitMQ ProtocolType = "rabbitmq"
 )
 
-// MessageContext holds the non-payload metadata of an intercepted message.
 type MessageContext struct {
-	Topic          string
-	Protocol       ProtocolType
-	Partition      int32
-	ExtractHeaders func() map[string]string
+	Topic     string
+	Protocol  ProtocolType
+	Partition int32
+	GetHeader func(key string) (string, bool)
 }
 
-// ChaosAction defines the engine's verdict on a specific message.
-type ChaosAction string
-
-const (
-	ActionPass  ChaosAction = "pass"  // Let the message flow naturally
-	ActionDrop  ChaosAction = "drop"  // Silently drop/ack the message without processing
-	ActionDelay ChaosAction = "delay" // Hold the message processing for a duration
-	ActionError ChaosAction = "error" // Force an unrecoverable broker error
-)
-
-// Evaluator is the core interface that decides the fate of a message based on active policies.
 type Evaluator interface {
-	Evaluate(ctx context.Context, msgCtx *MessageContext) (ChaosAction, time.Duration, error)
+	Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error)
 }

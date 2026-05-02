@@ -2,61 +2,63 @@ package brokerchaos
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/CemAkan/pastaay/pkg/metrics"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-// RabbitMQMiddleware acts as a chaos-injector for AMQP message deliveries.
 type RabbitMQMiddleware struct {
 	evaluator Evaluator
 }
 
-// NewRabbitMQMiddleware initializes the RabbitMQ chaos interceptor.
 func NewRabbitMQMiddleware(eval Evaluator) *RabbitMQMiddleware {
 	return &RabbitMQMiddleware{evaluator: eval}
 }
 
-// Intercept evaluates a single RabbitMQ delivery against active chaos policies.
 func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Delivery) (drop bool, err error) {
-	// Defensive check: Guard against nil pointer dereference
 	if delivery == nil {
 		return false, nil
 	}
 
-	// RabbitMQ uses RoutingKey or Exchange as the concept of Topic.
-	// We map RoutingKey to our generic Topic field.
 	msgCtx := &MessageContext{
 		Topic:    delivery.RoutingKey,
 		Protocol: ProtocolRabbitMQ,
-
-		ExtractHeaders: func() map[string]string {
-			headers := make(map[string]string, len(delivery.Headers))
-			for k, v := range delivery.Headers {
-				if strVal, ok := v.(string); ok {
-					headers[k] = strVal
+		GetHeader: func(key string) (string, bool) {
+			if val, ok := delivery.Headers[key]; ok {
+				if strVal, isStr := val.(string); isStr {
+					return strVal, true
 				}
+				return fmt.Sprintf("%v", val), true
 			}
-			return headers
+			return "", false
 		},
 	}
 
-	action, delay, evalErr := m.evaluator.Evaluate(ctx, msgCtx)
+	shouldDrop, delay, evalErr := m.evaluator.Evaluate(ctx, msgCtx)
+	metricTag := "rabbitmq:" + delivery.RoutingKey
 
-	switch action {
-	case ActionDrop:
-		return true, nil
-	case ActionError:
-		return true, evalErr
-	case ActionDelay:
-		// Context-aware blocking to survive Graceful Shutdowns.
+	if delay > 0 {
+		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
+		timer := time.NewTimer(delay)
 		select {
-		case <-time.After(delay):
-			return false, nil
+		case <-timer.C:
+			timer.Stop()
 		case <-ctx.Done():
+			timer.Stop()
 			return false, ctx.Err()
 		}
-	default:
-		return false, nil
 	}
+
+	if shouldDrop {
+		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "drop").Inc()
+		return true, nil
+	}
+	if evalErr != nil {
+		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
+		return true, evalErr
+	}
+
+	return false, nil
 }

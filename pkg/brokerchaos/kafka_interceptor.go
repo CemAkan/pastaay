@@ -4,20 +4,18 @@ import (
 	"context"
 	"time"
 
+	"github.com/CemAkan/pastaay/pkg/metrics"
 	"github.com/IBM/sarama"
 )
 
-// KafkaConsumerMiddleware acts as a chaos-injector before your application processes a Kafka message.
 type KafkaConsumerMiddleware struct {
 	evaluator Evaluator
 }
 
-// NewKafkaConsumerMiddleware initializes the Kafka chaos interceptor.
 func NewKafkaConsumerMiddleware(eval Evaluator) *KafkaConsumerMiddleware {
 	return &KafkaConsumerMiddleware{evaluator: eval}
 }
 
-// Intercept evaluates a single Kafka message against active chaos policies.
 func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.ConsumerMessage) (drop bool, err error) {
 	if msg == nil {
 		return false, nil
@@ -27,33 +25,48 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 		Topic:     msg.Topic,
 		Protocol:  ProtocolKafka,
 		Partition: msg.Partition,
-
-		ExtractHeaders: func() map[string]string {
-			headers := make(map[string]string, len(msg.Headers))
+		GetHeader: func(key string) (string, bool) {
 			for _, h := range msg.Headers {
-				headers[string(h.Key)] = string(h.Value)
+				if len(h.Key) == len(key) {
+					match := true
+					for i := 0; i < len(key); i++ {
+						if h.Key[i] != key[i] {
+							match = false
+							break
+						}
+					}
+					if match {
+						return string(h.Value), true
+					}
+				}
 			}
-			return headers
+			return "", false
 		},
 	}
 
-	// Policy Lookup
-	action, delay, evalErr := m.evaluator.Evaluate(ctx, msgCtx)
+	shouldDrop, delay, evalErr := m.evaluator.Evaluate(ctx, msgCtx)
+	metricTag := "kafka:" + msg.Topic
 
-	switch action {
-	case ActionDrop:
-		return true, nil
-	case ActionError:
-		return true, evalErr
-	case ActionDelay:
-		// Context-aware blocking.
+	if delay > 0 {
+		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
+		timer := time.NewTimer(delay)
 		select {
-		case <-time.After(delay):
-			return false, nil
+		case <-timer.C:
+			timer.Stop()
 		case <-ctx.Done():
+			timer.Stop()
 			return false, ctx.Err()
 		}
-	default:
-		return false, nil
 	}
+
+	if shouldDrop {
+		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "drop").Inc()
+		return true, nil
+	}
+	if evalErr != nil {
+		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
+		return true, evalErr
+	}
+
+	return false, nil
 }

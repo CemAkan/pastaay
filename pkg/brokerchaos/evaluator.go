@@ -20,85 +20,61 @@ type defaultEvaluator struct {
 }
 
 func NewEvaluator(provider ConfigProvider) Evaluator {
-	return &defaultEvaluator{
-		provider: provider,
-	}
+	return &defaultEvaluator{provider: provider}
 }
 
-func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext) (ChaosAction, time.Duration, error) {
-	if msgCtx == nil {
-		return ActionPass, 0, nil
-	}
-
-	if e.provider.IsCommandIgnored(string(msgCtx.Protocol), msgCtx.Topic) {
-		return ActionPass, 0, nil
-	}
-
-	select {
-	case <-ctx.Done():
-		return ActionPass, 0, ctx.Err()
-	default:
+func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error) {
+	if msgCtx == nil || e.provider.IsCommandIgnored(string(msgCtx.Protocol), msgCtx.Topic) {
+		return false, 0, nil
 	}
 
 	policies := e.provider.GetActivePolicies()
-	if len(policies) == 0 {
-		return ActionPass, 0, nil
-	}
-
-	var extractedHeaders map[string]string
-	headersExtracted := false
+	var delayDuration time.Duration
+	var shouldDrop bool
+	var chaosErr error
 
 	for _, p := range policies {
 		if !strings.EqualFold(p.Type, string(msgCtx.Protocol)) {
 			continue
 		}
-
-		isGlobal := strings.EqualFold(p.Target, "all")
-		isExactMatch := strings.EqualFold(p.Target, msgCtx.Topic)
-
-		if !isGlobal && !isExactMatch {
+		if !strings.EqualFold(p.Target, "all") && !strings.EqualFold(p.Target, msgCtx.Topic) {
 			continue
 		}
 
 		if len(p.MatchHeaders) > 0 {
-			if msgCtx.ExtractHeaders == nil {
+			if msgCtx.GetHeader == nil {
 				continue
 			}
-
-			if !headersExtracted {
-				extractedHeaders = msgCtx.ExtractHeaders()
-				headersExtracted = true
-			}
-
-			headersMatch := true
+			match := true
 			for k, v := range p.MatchHeaders {
-				if extractedHeaders[k] != v {
-					headersMatch = false
+				val, exists := msgCtx.GetHeader(k)
+				if !exists || val != v {
+					match = false
 					break
 				}
 			}
-
-			if !headersMatch {
+			if !match {
 				continue
 			}
+		}
+
+		if p.LatencyDuration > delayDuration && rand.Float64() < p.LatencyChance {
+			delayDuration = p.LatencyDuration
 		}
 
 		if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 			if p.DropConnection {
-				return ActionDrop, 0, nil
+				shouldDrop = true
+			} else {
+				msg := p.ErrorBody
+				if msg == "" {
+					msg = "pastaay: synthetic broker fault"
+				}
+				chaosErr = errors.New(msg)
 			}
-
-			errMsg := p.ErrorBody
-			if errMsg == "" {
-				errMsg = "pastaay synthetic broker fault: unrecoverable message error"
-			}
-			return ActionError, 0, errors.New(errMsg)
-		}
-
-		if p.LatencyDuration > 0 && rand.Float64() < p.LatencyChance {
-			return ActionDelay, p.LatencyDuration, nil
+			break
 		}
 	}
 
-	return ActionPass, 0, nil
+	return shouldDrop, delayDuration, chaosErr
 }
