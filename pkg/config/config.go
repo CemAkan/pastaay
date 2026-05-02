@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"regexp"
+	"time"
+)
 
 type Policy struct {
 	Name            string            `yaml:"name"`
@@ -13,18 +16,21 @@ type Policy struct {
 	ErrorBody       string            `yaml:"error_body,omitempty"`
 	MatchHeaders    map[string]string `yaml:"match_headers,omitempty"`
 	DropConnection  bool              `yaml:"drop_connection,omitempty"`
+	StreamRollMode  string            `yaml:"stream_roll_mode,omitempty"`
+	CompiledRegex   *regexp.Regexp    `yaml:"-"`
+	PolicyHash      uint64            `yaml:"-"`
+	IsWildcard      bool              `yaml:"-"`
+	WildcardPrefix  string            `yaml:"-"`
 }
 
 type PastaayConfig struct {
 	Version              int                 `yaml:"version"`
 	WarmupDuration       time.Duration       `yaml:"warmup_duration"`
-	EnableDefaultIgnored bool                `yaml:"enable_default_ignored"` // Global protection toggle
-	IgnoredCommands      map[string][]string `yaml:"ignored_commands"`       // Custom user overrides
+	EnableDefaultIgnored bool                `yaml:"enable_default_ignored"`
+	IgnoredCommands      map[string][]string `yaml:"ignored_commands"`
 	Policies             []Policy            `yaml:"policies"`
 }
 
-// DefaultProtectedCommands contains critical infrastructure commands and internal topics
-// that Pastaay should not sabotage during startup, migrations, or internal broker syncing.
 var DefaultProtectedCommands = map[string][]string{
 	"sql":      {"CREATE", "ALTER", "DROP", "TRUNCATE"},
 	"mongo":    {"create", "createIndexes", "drop", "collMod"},

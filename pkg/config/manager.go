@@ -1,6 +1,9 @@
 package config
 
 import (
+	"math"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,25 +18,68 @@ type Manager struct {
 }
 
 func NewManager(initialConfig *PastaayConfig) *Manager {
-	m := &Manager{
-		startTime: time.Now(),
-	}
-
+	m := &Manager{startTime: time.Now()}
 	emptyMap := make(map[string][]Policy)
 	m.typedPolicies.Store(&emptyMap)
-
 	m.Update(initialConfig)
 	return m
+}
+
+func generateStableHash(p *Policy) uint64 {
+	var h uint64 = 14695981039346656037
+	for _, s := range []string{p.Name, p.Target, p.Type, p.ErrorBody} {
+		for i := 0; i < len(s); i++ {
+			h ^= uint64(s[i])
+			h *= 1099511628211
+		}
+	}
+	var keys []string
+	for k := range p.MatchHeaders {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := p.MatchHeaders[k]
+		for i := 0; i < len(k); i++ {
+			h ^= uint64(k[i])
+			h *= 1099511628211
+		}
+		for i := 0; i < len(v); i++ {
+			h ^= uint64(v[i])
+			h *= 1099511628211
+		}
+	}
+	h ^= uint64(p.LatencyDuration)
+	h *= 1099511628211
+	h ^= uint64(p.ErrorCode)
+	h *= 1099511628211
+	h ^= math.Float64bits(p.LatencyChance)
+	h *= 1099511628211
+	h ^= math.Float64bits(p.ErrorChance)
+	h *= 1099511628211
+	return h
 }
 
 func (m *Manager) Update(newCfg *PastaayConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if newCfg != nil {
+		for i := range newCfg.Policies {
+			p := &newCfg.Policies[i]
+			if strings.EqualFold(p.Type, "sql") && !strings.EqualFold(p.Target, "ALL") && !strings.EqualFold(p.Target, "DATABASE") {
+				re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(strings.ToUpper(p.Target)) + `\b`)
+				if err == nil {
+					p.CompiledRegex = re
+				}
+			}
+			if strings.HasSuffix(p.Target, "*") {
+				p.IsWildcard = true
+				p.WildcardPrefix = strings.ToUpper(p.Target[:len(p.Target)-1])
+			}
+			p.PolicyHash = generateStableHash(p)
+		}
 		m.cfg.Store(newCfg)
 	}
-
 	cache := make(map[string][]Policy)
 	if newCfg != nil {
 		for _, p := range newCfg.Policies {
@@ -44,43 +90,58 @@ func (m *Manager) Update(newCfg *PastaayConfig) {
 }
 
 func (m *Manager) GetActivePolicies(policyType string) []Policy {
-	policiesPtr := m.typedPolicies.Load()
-	if policiesPtr == nil {
-		return nil
-	}
-	typed := *policiesPtr
-
+	ptr := m.typedPolicies.Load()
 	cfg := m.cfg.Load()
-	if cfg != nil && time.Since(m.startTime) < cfg.WarmupDuration {
+	if ptr == nil || (cfg != nil && time.Since(m.startTime) < cfg.WarmupDuration) {
 		return nil
 	}
-
-	return typed[policyType]
+	return (*ptr)[policyType]
 }
 
-// CleanSQLCommand strips comments and whitespace, and converts to uppercase.
 func CleanSQLCommand(cmd string) string {
-	cleanCmd := strings.TrimSpace(cmd)
-	for {
-		prev := cleanCmd
-		if strings.HasPrefix(cleanCmd, "/*") {
-			if endIndex := strings.Index(cleanCmd, "*/"); endIndex != -1 {
-				cleanCmd = strings.TrimSpace(cleanCmd[endIndex+2:])
-			}
-		}
-		if strings.HasPrefix(cleanCmd, "--") {
-			lines := strings.SplitN(cleanCmd, "\n", 2)
-			if len(lines) > 1 {
-				cleanCmd = strings.TrimSpace(lines[1])
-			} else {
-				cleanCmd = ""
-			}
-		}
-		if cleanCmd == prev {
-			break
-		}
+	if cmd == "" {
+		return ""
 	}
-	return strings.ToUpper(cleanCmd)
+	var result strings.Builder
+	inString := false
+	var stringChar byte
+	for i := 0; i < len(cmd); i++ {
+		char := cmd[i]
+		if char == '\'' || char == '"' {
+			isEscaped := false
+			for j := i - 1; j >= 0 && cmd[j] == '\\'; j-- {
+				isEscaped = !isEscaped
+			}
+			if !isEscaped {
+				if inString && char == stringChar {
+					inString = false
+				} else if !inString {
+					inString = true
+					stringChar = char
+				}
+			}
+		}
+		if !inString {
+			if char == '-' && i+1 < len(cmd) && cmd[i+1] == '-' {
+				for i < len(cmd) && cmd[i] != '\n' {
+					i++
+				}
+				result.WriteByte(' ')
+				continue
+			}
+			if char == '/' && i+1 < len(cmd) && cmd[i+1] == '*' {
+				endIdx := strings.Index(cmd[i+2:], "*/")
+				if endIdx != -1 {
+					i += endIdx + 3
+					result.WriteByte(' ')
+					continue
+				}
+			}
+		}
+		result.WriteByte(char)
+	}
+	clean := strings.Trim(result.String(), " \r\n\t;()")
+	return strings.ToUpper(clean)
 }
 
 func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
@@ -88,7 +149,6 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 	if cfg == nil {
 		return false
 	}
-
 	if cfg.EnableDefaultIgnored {
 		if list, ok := DefaultProtectedCommands[protocol]; ok {
 			for _, protected := range list {
@@ -98,7 +158,6 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 			}
 		}
 	}
-
 	if cfg.IgnoredCommands != nil {
 		if customList, ok := cfg.IgnoredCommands[protocol]; ok {
 			for _, custom := range customList {
@@ -108,17 +167,14 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 			}
 		}
 	}
-
 	return false
 }
 
 func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
-	var cleanCmd string
 	if protocol == "sql" {
-		cleanCmd = CleanSQLCommand(cmd)
-	} else {
-		cleanCmd = strings.ToUpper(strings.TrimSpace(cmd))
-		cleanCmd = strings.TrimPrefix(cleanCmd, "/")
+		return m.IsCleanCommandIgnored(protocol, CleanSQLCommand(cmd))
 	}
+	cleanCmd := strings.ToUpper(strings.TrimSpace(cmd))
+	cleanCmd = strings.TrimLeft(cleanCmd, "/")
 	return m.IsCleanCommandIgnored(protocol, cleanCmd)
 }
