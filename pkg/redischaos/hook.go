@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 	"github.com/redis/go-redis/v9"
 )
 

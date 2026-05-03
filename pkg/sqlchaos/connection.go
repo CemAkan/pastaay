@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/metrics"
 )
 
 type chaosKey struct{}
