@@ -27,11 +27,15 @@ func NewManager(initialConfig *PastaayConfig) *Manager {
 
 func generateStableHash(p *Policy) uint64 {
 	var h uint64 = 14695981039346656037
+	// Separator function to prevent field merging collisions
+	sep := func() { h ^= 0; h *= 1099511628211 }
+
 	for _, s := range []string{p.Name, p.Target, p.Type, p.ErrorBody} {
 		for i := 0; i < len(s); i++ {
 			h ^= uint64(s[i])
 			h *= 1099511628211
 		}
+		sep()
 	}
 
 	if len(p.MatchHeaders) > 0 {
@@ -43,20 +47,19 @@ func generateStableHash(p *Policy) uint64 {
 
 		for _, k := range keys {
 			v := p.MatchHeaders[k]
-			// Key hash
 			for i := 0; i < len(k); i++ {
 				h ^= uint64(k[i])
 				h *= 1099511628211
 			}
-			// Value hash
+			sep()
 			for i := 0; i < len(v); i++ {
 				h ^= uint64(v[i])
 				h *= 1099511628211
 			}
+			sep()
 		}
 	}
 
-	// 2. Resource Sabotage
 	h ^= uint64(p.ThrottleThreshold)
 	h *= 1099511628211
 	h ^= uint64(p.RAMChunkMB)

@@ -68,19 +68,27 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	chunkSize := chunkMB * 1024 * 1024
 	var pool [][]byte
 
+	// DRY allocation logic
+	allocate := func() {
+		chunk := make([]byte, chunkSize)
+		// Page-forcing: Bypassing lazy allocation
+		for i := 0; i < chunkSize; i += 4096 {
+			chunk[i] = 1
+		}
+		pool = append(pool, chunk)
+	}
+
+	allocate()
+
 	for {
 		select {
 		case <-ctx.Done():
+			// Amnesia Protocol: Immediate cleanup
 			pool = nil
 			runtime.GC()
 			return
 		case <-ticker.C:
-			chunk := make([]byte, chunkSize)
-			// Page-forcing
-			for i := 0; i < chunkSize; i += 4096 {
-				chunk[i] = 1
-			}
-			pool = append(pool, chunk)
+			allocate()
 		}
 	}
 }
