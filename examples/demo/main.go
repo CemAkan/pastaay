@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"time"
@@ -54,18 +53,18 @@ func main() {
 
 	go metrics.StartServer(":2112")
 
-	// --- Redis Setup ---
+	//  Redis Setup
 	rdb := redis.NewClient(&redis.Options{
 		Addr:   getEnv("REDIS_ADDR", "redis:6379"),
-		Dialer: redischaos.NewChaosDialer(cfgManager, &net.Dialer{Timeout: 5 * time.Second}),
+		Dialer: redischaos.NewChaosDialer(cfgManager, nil),
 	})
 	rdb.AddHook(redischaos.NewChaosHook(cfgManager))
 
-	// --- SQL Setup ---
+	//  SQL Setup
 	sqlchaos.Register("pastaay-postgres", &pq.Driver{}, cfgManager)
 	db, _ := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@db:5432/shortener?sslmode=disable"))
 
-	// --- Mongo Setup ---
+	//  Mongo Setup
 	mOpts := options.Client().ApplyURI(getEnv("MONGO_URI", "mongodb://mongo:27017"))
 	mongochaos.ApplyChaos(mOpts, cfgManager)
 	mClient, _ := mongo.Connect(mOpts)
@@ -73,7 +72,7 @@ func main() {
 	kafkaEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "kafka"})
 	rabbitEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "rabbitmq"})
 
-	// --- Kafka Setup ---
+	//  Kafka Setup
 	go func() {
 		kafkaAddr := getEnv("KAFKA_ADDR", "redpanda:9092")
 
@@ -137,7 +136,7 @@ func main() {
 		}
 	}()
 
-	// --- RabbitMQ Setup ---
+	//  RabbitMQ Setup
 	go func() {
 		rabbitURL := getEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 		var conn *amqp.Connection
@@ -197,24 +196,21 @@ func main() {
 		}
 	}()
 
-	// --- HTTP API ---
+	//  HTTP API
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
-		// Mongo Ping
 		if err := mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}}).Err(); err != nil {
 			log.Printf("[CHAOS] [MONGO] Connection/Command failed: %v", err)
 		} else {
 			log.Printf("[OK] [MONGO] Ping successful")
 		}
 
-		// Redis Ping
 		if err := rdb.Ping(r.Context()).Err(); err != nil {
 			log.Printf("[CHAOS] [REDIS] Cache Miss or Error: %v", err)
 		} else {
 			log.Printf("[OK] [REDIS] Ping successful")
 		}
 
-		// SQL Ping
 		if err := db.PingContext(r.Context()); err != nil {
 			log.Printf("[CHAOS] [SQL] Query failed: %v", err)
 		} else {
@@ -225,9 +221,9 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "PONG"})
 	})
 
-	// --- Dummy HTTP Traffic Generator ---
+	//  Dummy HTTP Traffic Generator
 	go func() {
-		time.Sleep(5 * time.Second) // Server'ın kalkmasını bekle
+		time.Sleep(5 * time.Second)
 		client := &http.Client{Timeout: 2 * time.Second}
 		for {
 			resp, err := client.Get("http://localhost:8080/api/v1/ping")
