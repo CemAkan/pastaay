@@ -9,20 +9,15 @@ import (
 
 func TestCPUBurner_ContextCancellation(t *testing.T) {
 	initialGoroutines := runtime.NumGoroutine()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-
-	// Attempt to burn 4 cores
-	BurnCPU(ctx, 4)
+	
+	BurnCPU(ctx, 4, 100000)
 
 	<-ctx.Done()
-	// Wait briefly for goroutines to terminate
 	time.Sleep(50 * time.Millisecond)
-
 	finalGoroutines := runtime.NumGoroutine()
 
-	// Leak tolerance: +/- 2 goroutines due to test runner background tasks
 	if finalGoroutines > initialGoroutines+2 {
 		t.Fatalf("CPU Burner goroutine leak detected! Initial: %d, Final: %d", initialGoroutines, finalGoroutines)
 	}

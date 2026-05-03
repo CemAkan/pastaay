@@ -33,22 +33,37 @@ func generateStableHash(p *Policy) uint64 {
 			h *= 1099511628211
 		}
 	}
-	var keys []string
-	for k := range p.MatchHeaders {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := p.MatchHeaders[k]
-		for i := 0; i < len(k); i++ {
-			h ^= uint64(k[i])
-			h *= 1099511628211
+
+	if len(p.MatchHeaders) > 0 {
+		keys := make([]string, 0, len(p.MatchHeaders))
+		for k := range p.MatchHeaders {
+			keys = append(keys, k)
 		}
-		for i := 0; i < len(v); i++ {
-			h ^= uint64(v[i])
-			h *= 1099511628211
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			v := p.MatchHeaders[k]
+			// Key hash
+			for i := 0; i < len(k); i++ {
+				h ^= uint64(k[i])
+				h *= 1099511628211
+			}
+			// Value hash
+			for i := 0; i < len(v); i++ {
+				h ^= uint64(v[i])
+				h *= 1099511628211
+			}
 		}
 	}
+
+	// 2. Resource Sabotage
+	h ^= uint64(p.ThrottleThreshold)
+	h *= 1099511628211
+	h ^= uint64(p.RAMChunkMB)
+	h *= 1099511628211
+	h ^= uint64(p.RAMInterval)
+	h *= 1099511628211
+
 	h ^= uint64(p.LatencyDuration)
 	h *= 1099511628211
 	h ^= uint64(p.ErrorCode)

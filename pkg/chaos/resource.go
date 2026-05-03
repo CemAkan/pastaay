@@ -4,77 +4,82 @@ import (
 	"context"
 	"crypto/sha256"
 	"runtime"
+	"sync"
 	"time"
 )
-
-// Sink prevents the Go compiler from optimizing away our CPU-burning loops.
-var CPUSink [32]byte
 
 // ResourcePolicy holds the configuration for OS-level resource sabotage.
 type ResourcePolicy struct {
 	CPU struct {
-		Enabled  bool
-		Cores    int           // 0 means all available cores (runtime.NumCPU)
-		Duration time.Duration // Duration of the chaos
+		Enabled           bool
+		Cores             int
+		Duration          time.Duration
+		ThrottleThreshold int
 	}
 	RAM struct {
 		Enabled  bool
-		ChunkMB  int           // Megabytes to allocate per tick
-		Interval time.Duration // Allocation interval
-		Duration time.Duration // Duration of the chaos
+		ChunkMB  int
+		Interval time.Duration
+		Duration time.Duration
 	}
 }
 
-// BurnCPU locks the processor to 100% by bypassing compiler optimizations.
-func BurnCPU(ctx context.Context, cores int) {
+// BurnCPU locks the processor by bypassing compiler optimizations with local sinks.
+func BurnCPU(ctx context.Context, cores int, threshold int) {
 	if cores <= 0 {
 		cores = runtime.NumCPU()
 	}
+	if threshold <= 0 {
+		threshold = 100000
+	}
 
+	var wg sync.WaitGroup
 	for i := 0; i < cores; i++ {
+		wg.Add(1)
 		go func() {
-			// Heavy payload to keep the ALU busy
-			dummyPayload := []byte("pastaay-strict-cpu-sabotage-vector")
+			defer wg.Done()
+			payload := []byte("pastaay-cpu-vector")
+			var localSink [32]byte
 			for {
+				for j := 0; j < threshold; j++ {
+					localSink = sha256.Sum256(payload)
+				}
+				_ = localSink
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					// Cryptographic operation assigned to a global sink
-					CPUSink = sha256.Sum256(dummyPayload)
+					continue
 				}
 			}
 		}()
 	}
+	wg.Wait()
 }
 
 // LeakRAM exhausts physical RAM by evading the OS Demand Paging mechanism.
 func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
+	if interval <= 0 {
+		interval = 1 * time.Second
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	chunkSize := chunkMB * 1024 * 1024
-
-	// Local pool ensures isolation
 	var pool [][]byte
 
 	for {
 		select {
 		case <-ctx.Done():
-			// CHAOS ENDED
 			pool = nil
 			runtime.GC()
 			return
 		case <-ticker.C:
-			// Allocate memory
 			chunk := make([]byte, chunkSize)
-
-			// Write 1 byte to every 4KB block
+			// Page-forcing
 			for i := 0; i < chunkSize; i += 4096 {
 				chunk[i] = 1
 			}
-
-			// Append to local pool to evade premature garbage collection
 			pool = append(pool, chunk)
 		}
 	}
@@ -86,7 +91,7 @@ func TriggerResourceSabotage(policy ResourcePolicy) {
 		ctx, cancel := context.WithTimeout(context.Background(), policy.CPU.Duration)
 		go func() {
 			defer cancel()
-			BurnCPU(ctx, policy.CPU.Cores)
+			BurnCPU(ctx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
 		}()
 	}
 
