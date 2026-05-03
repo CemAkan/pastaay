@@ -1,8 +1,7 @@
 global:
-  scrape_interval: 5s # Collect metrics every 5 seconds
+  scrape_interval: 5s
 
 scrape_configs:
   - job_name: 'pastaay_demo'
     static_configs:
-      # In Docker Compose, our application service is named 'app'
       - targets: ['app:2112']

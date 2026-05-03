@@ -16,7 +16,9 @@ func TestChaosDialer_DropConnection(t *testing.T) {
 		Policies: []config.Policy{
 			{
 				Type:           "mongo",
+				Target:         "all",
 				DropConnection: true,
+				ErrorChance:    1.0,
 			},
 		},
 	})
@@ -44,6 +46,7 @@ func TestChaosMonitor_Latency(t *testing.T) {
 		Policies: []config.Policy{
 			{
 				Type:            "mongo",
+				Target:          "all",
 				LatencyDuration: latency,
 				LatencyChance:   1.0,
 			},

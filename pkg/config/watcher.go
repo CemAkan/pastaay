@@ -13,9 +13,10 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 	if err != nil {
 		return err
 	}
-
 	var timer *time.Timer
 	var timerMu sync.Mutex
+	var reattachTimer *time.Timer
+	var reattachMu sync.Mutex
 
 	go func() {
 		defer watcher.Close()
@@ -25,56 +26,55 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 				if !ok {
 					return
 				}
-
-				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-					log.Println("Pastaay: Config file removed/renamed. Attempting to re-attach watcher...")
-
-					go func(path string) {
-						for i := 0; i < 5; i++ {
-							time.Sleep(1 * time.Second)
-							if err := watcher.Add(path); err == nil {
-								log.Println("Pastaay: Watcher successfully re-attached.")
-
-								if newCfg, loadErr := LoadConfig(path); loadErr == nil {
-									log.Println("Pastaay: Config force-reloaded after file replacement.")
-									reloadCallback(newCfg)
-								}
-								return
+				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Chmod) {
+					reattachMu.Lock()
+					if reattachTimer != nil {
+						if !reattachTimer.Stop() {
+							select {
+							case <-reattachTimer.C:
+							default:
 							}
 						}
-						log.Printf("[ERROR] Pastaay: CRITICAL - Failed to re-attach watcher to %s after 5 retries. Hot-reload is dead.\n", path)
-					}(filePath)
+					}
+					reattachTimer = time.AfterFunc(100*time.Millisecond, func() {
+						log.Println("Pastaay: Config file update detected. Re-attaching...")
+						for i := 0; i < 5; i++ {
+							time.Sleep(1 * time.Second)
+							if err := watcher.Add(filePath); err == nil {
+								if newCfg, loadErr := LoadConfig(filePath); loadErr == nil {
+									reloadCallback(newCfg)
+									return
+								}
+							}
+						}
+					})
+					reattachMu.Unlock()
 				}
-
 				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
 					timerMu.Lock()
 					if timer != nil {
-						timer.Stop()
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
 					}
-
 					timer = time.AfterFunc(500*time.Millisecond, func() {
-						log.Println("Pastaay: Configuration change detected and debounced...")
-
 						var newCfg *PastaayConfig
 						var loadErr error
-
 						for i := 0; i < 3; i++ {
 							time.Sleep(100 * time.Millisecond * time.Duration(i+1))
-							newCfg, loadErr = LoadConfig(filePath)
-							if loadErr == nil {
+							if newCfg, loadErr = LoadConfig(filePath); loadErr == nil {
 								break
 							}
 						}
-
-						if loadErr != nil {
-							log.Printf("Pastaay: Error reloading config after retries: %v\n", loadErr)
-							return
+						if loadErr == nil {
+							reloadCallback(newCfg)
 						}
-						reloadCallback(newCfg)
 					})
 					timerMu.Unlock()
 				}
-
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
@@ -83,6 +83,5 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 			}
 		}
 	}()
-
 	return watcher.Add(filePath)
 }

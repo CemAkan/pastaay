@@ -1,8 +1,6 @@
 package mongochaos
 
 import (
-	"net"
-
 	"github.com/CemAkan/pastaay/pkg/config"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -12,11 +10,15 @@ func ApplyChaos(opts *options.ClientOptions, mgr *config.Manager) *options.Clien
 	if opts == nil {
 		opts = options.Client()
 	}
+	
+	var existingDialer options.ContextDialer
+	if opts.Dialer != nil {
+		existingDialer = opts.Dialer
+	}
 
-	// Inject both the monitor and the dialer into the client configuration.
 	opts.SetMonitor(NewChaosMonitor(mgr))
 	opts.SetDialer(&ChaosDialer{
-		DefaultDialer: &net.Dialer{},
+		DefaultDialer: existingDialer,
 		Manager:       mgr,
 	})
 

@@ -4,56 +4,76 @@
   <img src="assets/main_description.png" alt="Pastaay Description">
 </p>
 
-
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.5.1-blue.svg" alt="Release">
-  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
+  <img src="https://img.shields.io/badge/Release-v1.6-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version">
+  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
+## Core Features
 
-## Features
+*   **Universal Chaos:** Kafka, RabbitMQ, HTTP, gRPC, SQL, MongoDB, and Redis support.
+*   **Security Hardened:** Native protection against multi-slash URL bypasses and SQL delimiter evasion.
+*   **Deterministic Cascading:** Complex gRPC stream rules that don't short-circuit.
+*   **Standardized Metrics:** Single-source-of-truth monitoring with `protocol:target` labeling.
+---
 
-* **Application-Level Chaos:** Inject faults directly into HTTP middleware, SQL drivers, gRPC Interceptors, MongoDB (v2) monitors, and Redis Hooks.
-* **Smart Mode (v1.5+):** Intelligent warmup durations and automatic DDL/Setup command protection (e.g., bypassing `CREATE TABLE` or `createIndexes`) to ensure safe application boot under chaos.
-* **Unbreakable Bypass Protection (v1.5.1):** Advanced SQL comment scrubbing (`/*`, `--`) prevents malicious or accidental bypasses of ignored commands.
-* **Crash-Loop Immunity:** Built-in intelligent retries ensure the Chaos Engine and demo applications survive race conditions in Docker-Compose environments where databases boot slower than the API.
-* **Granular & Case-Insensitive Targeting:** Target specific queries (e.g., `INSERT INTO users`) or broad protocols seamlessly. All targets are strictly evaluated via `EqualFold` to eliminate uppercase/lowercase mismatches.
-* **Network-Level Sabotage:** Forcefully drop physical TCP connections. (Safeguarded to only execute on global targets to prevent accidental localized connection pool nukes).
-* **Amnesia-Proof Hot-Reloading:** Watch `pastaay.yaml` via `fsnotify`. Automatically recovers from atomic file saves (Vim/Nano `Remove/Rename` events) without permanently blinding the file watcher.
-* **Native Observability:** Built-in Prometheus metrics (`/metrics`) to track and graph injected faults with zero blocking latency.
+## Hot-Reloading
+
+Pastaay is built to be reactive. The following demonstration shows the engine's **amnesia-proof hot-reload** capability via our built-in TUI visualizer. Watch as it detects manual updates to `pastaay.yaml` and instantly transitions between stable, high-latency (Glitch), and disconnected (Void) states without dropping the underlying connection or requiring a service restart.
+
+<p align="center">
+  <img src="assets/hot_reload_demo.gif" width="850" alt="Pastaay Hot-Reloading Demonstration">
+</p>
+
+> **Reactivity:** The engine reacts to `latency_chance` and `error_chance` updates within milliseconds of the file being saved.
 
 ---
 
-##  Release History (Changelog)
+## Zero Allocation 
 
-| Version         | Highlights | Impact |
-|:----------------| :--- | :--- |
-| **v1.5.1**      | **Amnesia-Proof Watcher:** Fixes Linux file-save detachment bugs.<br>**Double-Chaos Shield:** Guards against Go standard library context fallbacks.<br>**Pointer-Safe Pipelines:** Corrects slice iteration memory traps in Redis Hooks.<br>**Crash-Loop Immunity:** Resilient DB dialing. | Achieves absolute structural perfection. Zero memory leaks, zero silent bypasses, and 100% accurate policy targeting in production. |
-| **v1.5.0**      | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Optimized Engine:** Map-based caching for O(1) policy checks.<br>**Network Sabotage:** TCP `drop_connection` capabilities. | Allows safe DB migrations during chaos. Delivers high-throughput performance with instant hot-reloading. |
-| **v1.0 - v1.4** | HTTP Middleware, Redis Hooks, gRPC Interceptors, SQL Driver Wrapper, YAML Hot-Reloading, and Native Prometheus Metrics. | Established the core chaos engine architecture, baseline protocols, and native observability. |
+Pastaay is built to survive high-throughput data streams. Our core evaluator guarantees **O(1)** policy lookups and **0 Bytes** of memory allocation per operation, ensuring your application never suffers from Garbage Collection (GC) spikes.
+
+<p align="center">
+  <img src="assets/benchmark.png" alt="Pastaay Zero Allocation Benchmark">
+</p>
+
+---
+
+
+## Changelog
+
+| Version | Highlights                                                                                                                                                                                                                                  | Impact |
+| :--- |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| :--- |
+| **v1.6.0** | **Message Brokers:** Kafka & RabbitMQ Interceptors. **Hardened Standard**: Unified `protocol:target` labels and Triple-slash evasion protection. Mongo Abort: Synchronous execution blocking.                                                 | Eliminates observability fragmentation and ensures zero-bypass security for ignore lists in high-throughput distributed systems.|
+| **v1.5.x** | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Amnesia-Proof Watcher:** Fixes Linux file-save detachment bugs.<br>**Double-Chaos Shield:** Guards against Go standard library fallbacks.<br>**Network Sabotage:** TCP `drop_connection`. | Achieves absolute structural perfection. Zero memory leaks, zero silent bypasses, and 100% accurate policy targeting in production. |
+| **v1.0 - v1.4** | HTTP Middleware, Redis Hooks, gRPC Interceptors, SQL Driver Wrapper, YAML Hot-Reloading, and Native Metrics.                                                                                                                                | Established the core chaos engine architecture, baseline protocols, and native observability. |
 
 <br>
 
 ---
+
 ## Documentation
+
 Dive deep into Pastaay's mechanics using our official documentation:
 * [The Configuration Guide](docs/configuration.md) - Learn how to write policies, target endpoints, and control the blast radius.
-* [Architecture & Engine](docs/architecture.md) - Understand how the Policy Engine achieves zero latency lookups, and how we solved deep OS/Compiler integration bugs.
+* [Architecture & Engine](docs/architecture.md) - Understand how the Policy Engine achieves zero-latency lookups, and how we solved deep OS/Compiler integration bugs.
+
 ---
 
-## Installation
+##  Installation
 
 ```bash
 go get github.com/CemAkan/pastaay
 ```
+
 ---
 
 ## Quick Start
 
-1. Create a pastaay.yaml configuration file:
+### 1. Create a Configuration File (`pastaay.yaml`):
 
-```YAML
-
+```yaml
 version: 1
 warmup_duration: "10s"
 enable_default_ignored: true
@@ -72,12 +92,9 @@ policies:
     drop_connection: true
 ```
 
----
+### 2. Integrate into your Go application:
 
-## 2. Integrate into your Go application:
-
-```Go
-
+```go
 package main
 
 import (
@@ -110,55 +127,65 @@ func main() {
 
 ---
 
-## Running the Demo (Docker)
+## Running the Demos
 
-To see Pastaay in action with a complete URL Shortener API, PostgreSQL database, Redis, Prometheus, and Grafana:
-```Bash
-cd examples/demo
-docker compose up -d --build
+Pastaay ships with two distinct examples to help you understand both its integration mechanics and its real-time reactivity.
+1. The Integration Demo
+   A complete, hardened microservice stack (URL Shortener API, PostgreSQL, Redis, MongoDB, Kafka, RabbitMQ) showing how to securely integrate Pastaay without race conditions.
+
+```bash
+   cd examples/demo
+   docker compose up -d --build
+   docker compose logs -f app
 ```
-<br>
+
 
 * **API:** `http://localhost:8080`
 * **Metrics:** `http://localhost:2112/metrics`
 * **Prometheus UI:** `http://localhost:9090`
 * **Grafana:** `http://localhost:3000`
 
------
+<br>
 
-## Roadmap: The Future of Pastaay
+2. The TUI Visualizer (Vortex)
+   A standalone terminal user interface built to demonstrate Pastaay's amnesia-proof hot-reloading. This is the source of the GIF shown above.
+   cd examples/visualizer
+
+> **Note**: Use 'run' instead of 'up' to ensure a clean TTY for the visualizer
+docker compose run --rm --service-ports app
+
+---
+
+## Roadmap:
 
 Pastaay is rapidly evolving into a full-fledged enterprise chaos engineering suite. Here is our aggressive roadmap for the upcoming major releases:
 
-| Version | Planned Features | Status        |
-| :--- | :--- |:--------------|
-| **v1.6** | **Message Brokers:** Kafka & RabbitMQ Interceptors for message queue chaos and event dropping. |  In Progress  |
-| **v1.7** | **Resource Sabotage:** CPU Stressors and RAM Bloaters to simulate memory leaks and compute starvation. |  Planned    |
-| **v1.8** | **Advanced Observability:** Distributed Tracing (OpenTelemetry) integration and latency percentile graphing. |  Planned    |
-| **v1.9** | **Cloud & Low-Level:** AWS Fault Injection Simulator (FIS) hooking and eBPF-based packet dropping without code changes. |  Conceptual |
-| **v2.0** | **The Enterprise Suite:** Kubernetes Operator (`pastaay-operator` via CRDs), CLI Tool (`pastaay-cli`), and a real-time Web Dashboard UI. |  Conceptual |
+| Version | Planned Features | Status       |
+| :--- | :--- |:-------------|
+| **v1.7** | **Resource Sabotage:** CPU Stressors and RAM Bloaters to simulate memory leaks and compute starvation. |  In Progress |
+| **v1.8** | **Advanced Observability:** Distributed Tracing (OpenTelemetry) integration and latency percentile graphing. | Planned      |
+| **v1.9** | **Cloud & Low-Level:** AWS Fault Injection Simulator (FIS) hooking and eBPF-based packet dropping without code changes. | Conceptual   |
+| **v2.0** | **The Enterprise Suite:** Kubernetes Operator (`pastaay-operator` via CRDs), CLI Tool (`pastaay-cli`), and a real-time Web Dashboard UI. | Conceptual   |
 
 <br>
 
 ---
 
----
+##  Contributing
 
-## Contributing
-
-Contributions are always welcome. Whether looking to build a new protocol interceptor, patch a core bug, or refine the documentation, the effort is highly valued.
+Contributions from the community are always welcome <3 Whether you are looking to build a new protocol interceptor, patch a core bug, or refine the documentation, your input is highly valued.
 
 Please read the [Contributing Guide](CONTRIBUTING.md) for detailed instructions on the development workflow, core architectural guidelines (including pointer safety and interceptor fallbacks), and how to submit a Pull Request.
 
 ---
 
-## License
+##  License
 
-Pastaay is open-sourced software licensed under the [MIT license](LICENSE).
+Pastaay is open-sourced software licensed under the [MIT License](LICENSE).
 
 ---
 
 <p align="center">
-<img src="assets/main_bottom.png" alt="Pastaay QR Code">
+  <img src="assets/main_bottom.png" alt="Pastaay QR Code">
 </p>
 

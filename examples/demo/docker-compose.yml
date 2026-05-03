@@ -1,23 +1,25 @@
 services:
   app:
     build:
-      context: .
+      context: ../../
       dockerfile: examples/demo/Dockerfile
-      network: host
     ports:
       - "8080:8080"
       - "2112:2112"
-      - "50051:50051"
     environment:
       - REDIS_ADDR=redis:6379
       - DB_DSN=postgres://pastaay:secret@db:5432/shortener?sslmode=disable
       - MONGO_URI=mongodb://mongo:27017
+      - KAFKA_ADDR=redpanda:9092
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     volumes:
-      - ./examples/demo/pastaay.yaml:/root/pastaay.yaml
+      - ./:/root/config/
     depends_on:
       - db
       - redis
       - mongo
+      - redpanda
+      - rabbitmq
 
   mongo:
     image: mongo:6.0
@@ -38,9 +40,21 @@ services:
     ports:
       - "5433:5432"
 
-  prometheus:
-    image: prom/prometheus:latest
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
     ports:
-      - "9090:9090"
-    volumes:
-      - ./examples/demo/prometheus.yml:/etc/prometheus/prometheus.yml
+      - "5672:5672"
+      - "15672:15672"
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"

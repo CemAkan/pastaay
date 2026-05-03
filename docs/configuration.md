@@ -5,7 +5,7 @@
 
 The `pastaay.yaml` file is the heart of the chaos engine. With the introduction of **Smart Mode in v1.5.1**, the configuration supports global protection rules, granular targeting, and case-insensitive policy matching.
 
-## Global Settings 
+## Global Settings
 
 These settings govern the overall behavior of the Pastaay engine and protect your application during critical phases.
 
@@ -20,28 +20,29 @@ These settings govern the overall behavior of the Pastaay engine and protect you
 
 ---
 
-###  Deep Dive: Customizing `ignored_commands` & Anti-Bypass
+## Deep Dive: Customizing `ignored_commands` & Anti-Bypass
 
-The `ignored_commands` field allows you to explicitly protect certain queries or commands from chaos injection. 
+### Crucial Matching Rules:
 
-**Crucial Matching Rules:**
-1. **Case-Insensitive:** Pastaay automatically converts both your YAML rules and the incoming queries to `UPPERCASE` before comparing. `select` matches `SELECT` and `sElEcT`.
-2. **Prefix Matching:** Pastaay uses a prefix matching engine. If you ignore `"CREATE"`, it protects `"CREATE TABLE..."`, `"CREATE INDEX..."`, etc.
-3. **Advanced Anti-Bypass Scrubbing (v1.5.1+):** Pastaay strictly scrubs mixed SQL comments (e.g., `/* comment */`, `-- comment`) and whitespaces before evaluation. A query like `/* Bypass Attempt */ CREATE TABLE` will still be correctly identified and protected.
+* **Case-Insensitivity**: All targets and incoming commands are normalized to `UPPERCASE` before evaluation.
+* **SQL Stripping**: The engine strips all standard SQL delimiters, including parentheses `()` and semicolons `;`. A query like `(SELECT 1)`; matches `SELECT 1` in your policies.
+* **Slash Normalization**: Leading slashes in HTTP/gRPC paths are normalized. `///api/ping` will match `api/ping`.
 
-**Complete Map Example:**
+### Complete Map Example:
 ```yaml
 enable_default_ignored: true
 ignored_commands:
   sql:
-    - "SELECT 1"      # Protects health check pings
+    - "SELECT 1"      # Protects database health check pings
     - "EXPLAIN"       # Protects query planners
   mongo:
-    - "ping"          
+    - "ping"
     - "buildInfo"
   redis:
     - "PING"
-    - "AUTH"          
+    - "AUTH"
+  kafka:
+    - "heartbeat"     # Protects consumer group stability
 ```
 
 ---
@@ -50,20 +51,70 @@ ignored_commands:
 
 Each policy in the `policies` list supports the following fields to precisely target and execute chaos:
 
-| Field | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `name` | `string` | No | A unique identifier for the policy (useful for debugging). |
-| `type` | `string` | **Yes** | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`. |
-| `target` | `string` | **Yes** | Endpoint, route, or specific query to target. **Strictly Case-Insensitive.** |
-| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency. |
-| `latency_duration`| `string` | No | Delay duration (e.g., `500ms`, `2s`). |
-| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault. |
-| `error_code` | `int` | No | Custom HTTP/gRPC Status Code *(type: http/grpc only)*. |
-| `error_body` | `string` | No | Custom response/error message. |
-| `drop_connection`| `bool` | No | Forcefully rejects the TCP dial connection. **Safeguard: Requires `target: "all"` or `"database"` to execute.** |
-| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control. |
-
+| Field                               | Type           | Required | Description                                                                                                     |
+|:------------------------------------|:---------------|:---------|:----------------------------------------------------------------------------------------------------------------|
+| `name`                              | `string`       | No       | A unique identifier for the policy (useful for debugging).                                                      |
+| `type`                              | `string`       | **Yes**  | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`,`kafka`,`rabbitmq`.                                   |
+| `target`                            | `string`       | **Yes**  | Endpoint, route, or specific query to target. **Strictly Case-Insensitive.**                                    |
+| `latency_chance`                    | `float`        | No       | Probability (0.0 to 1.0) of injecting latency.                                                                  |
+| `latency_duration`                  | `string`       | No       | Delay duration (e.g., `500ms`, `2s`).                                                                           |
+| `error_chance`                      | `float`        | No       | Probability (0.0 to 1.0) of injecting a synthetic error/fault.                                                  |
+| `error_code`                        | `int`          | No       | Custom HTTP/gRPC Status Code *(type: http/grpc only)*.                                                          |
+| `error_body`                        | `string`       | No       | Custom response/error message.                                                                                  |
+| `drop_connection`                   | `bool`         | No       | Forcefully rejects the TCP dial connection. **Safeguard: Requires `target: "all"` or `"database"` to execute.** |
+| `match_headers`                     | `map`          | No       | Key-value pairs for Blast Radius Control.                                                                       |
+| `stream_roll_mode`                  | `string`       | No       | gRPC Exclusive. Values: `"stream"` or `"message"`.                                                                  |
 <br>
+
+---
+
+This information should be placed within the `docs/configuration.md` file, specifically under the **"gRPC Chaos"** subsection within the **"Target Types & Granular Fault Behavior"** section. It should also be reflected as a field in the **"Policy Structure"** table.
+
+Here is the professional English translation and technical breakdown for your documentation:
+
+---
+
+### **gRPC Chaos: Deterministic Stream Logic (Dice Logic)**
+
+Long-lived gRPC streams require high consistency to avoid breaking application-level state machines. The `stream_roll_mode` defines when the Chaos Engine "rolls the dice" to determine if a fault should be injected.
+
+*   **`stream` (Default):**
+    *   The dice is rolled exactly **once** at the initiation of the stream.
+    *   The decision (Latency or Error) is stored in the `decidedPolicies` map.
+    *   This result is applied consistently to every message throughout the stream's lifecycle.
+    *   **Use Case:** This is the safest way to simulate total link failure or constant degradation without triggering illegal state transitions in the Go gRPC runtime.
+
+*   **`message`:**
+    *   The dice is rolled independently for **every** `SendMsg` or `RecvMsg` call.
+    *   Decisions are not cached.
+    *   **Use Case:** Ideal for simulating intermittent glitches, packet loss, or sporadic jitter in high-frequency data streams.
+
+
+*   **FNV-1a Fingerprinting:**
+    *   Pastaay utilizes an FNV-1a based fingerprinting algorithm to generate a `PolicyHash`.
+    *   This hash ensures that the engine recognizes the specific policy identity even during a **hot-reload**.
+    *   This allows active streams to maintain their "Chaos Fate" consistently even if the `pastaay.yaml` file is modified and re-parsed while the stream is open.
+
+---
+
+**Note for Implementation:** Ensure you update the **Policy Structure** table to include the `stream_roll_mode` field as an optional string for the `grpc` type.
+
+
+
+---
+
+## Observability & Labels
+
+Every fault injected by Pastaay is reported to Prometheus. For granular filtering in Grafana, use the `protocol:target` format:
+
+| Protocol | Label Example | Target logic |
+| :--- | :--- | :--- |
+| **HTTP** | `http:/api/v1/login` | Normalized path. |
+| **SQL** | `sql:database` | Global or query-specific regex match. |
+| **gRPC** | `grpc:/pb.Svc/Method` | Full method name. |
+| **Kafka** | `kafka:topic_name` | Exact topic name. |
+| **RabbitMQ** | `rabbitmq:routing_key`| Exact routing key or queue. |
+| **Redis** | `redis:get` | Exact command name or `all`. |
 
 ---
 
@@ -84,18 +135,33 @@ How Pastaay interprets faults depends entirely on the `type` of the policy.
 * **Fault Behavior:** Injects latency at the event monitor level.
 
 ### 4. gRPC Chaos (`type: "grpc"`)
-* **Target Format:** Full Method Name (e.g., `/service.v1.MyService/MyMethod`). Evaluated Case-Insensitive.
-* **Fault Behavior:** Aborts the request returning a `codes.Unavailable` status.
+Unlike request-response protocols, gRPC streams require consistency. v1.6.0 uses FNV-1a Fingerprinting to ensure policy stability.
+
+* **Per-Stream Dice**: When `stream_roll_mode: "stream"` is used, the "Chaos Fate" is decided only once when the stream is initialized. This prevents long-lived streams from "flickering" between normal and chaotic states.
+* **Fingerprint Consistency**: Even during a `hot-reload`, the engine uses the FNV-1a hash to ensure running streams maintain their original behavior.
 
 ### 5. Redis Chaos (`type: "redis"`)
 * **Target Format:** Specific command (e.g., `"get"`, `"set"`), or `"all"`.
 * **Fault Behavior:** Simulates a **Cache Miss** by returning a `redis.Nil` error. Respects pipeline sequence (latency strictly applied *before* physical execution).
 
+### 6. Kafka Chaos (`type: "kafka"`)
+* **Target Format:** Kafka Topic Name (e.g., `"user_events"`, `"orders"`), or `"all"`.
+* **Fault Behavior:** `error_chance` forces a synthetic unrecoverable message error. `latency_chance` halts the consumer goroutine securely using context-aware `select` blocks to avoid blocking graceful shutdowns. `drop_connection` explicitly drops the message, bypassing the application logic entirely.
+
+### 7. RabbitMQ Chaos (`type: "rabbitmq"`)
+* **Target Format:** Routing Key, Exchange, or Queue Name (e.g., `"payment.processed"`), or `"all"`.
+* **Fault Behavior:** Mirrors Kafka behavior. Uses zero-allocation header extraction and enforces strict type-assertion on AMQP headers to guarantee the Chaos Engine never triggers a Go runtime panic.
 ---
 
 ## Cascading Rules
 Pastaay supports cascading chaos rules. A single route can be targeted by multiple policies. For instance, a request can be hit by a latency policy first, and subsequently hit by an error policy without short-circuiting.
 
-## Hot-Reloading Behavior
-Pastaay watches this file natively. If you modify `pastaay.yaml` while your application is running, the new policies are loaded instantly. Pastaay is immune to Linux `Vim/Nano` amnesia (file replace events) and will auto-recover the file watcher dynamically.
+---
 
+## Hot-Reloading: Amnesia-Proof Daemon
+
+Pastaay is hardened against the "Linux File-Save Amnesia" bug. Standard editors like Vim or Nano delete the original file inode during a save.
+
+* **Recovery**: Pastaay natively traps Rename/Remove events.
+
+* **Re-attachment**: It engages an asynchronous retry loop to re-attach the fsnotify watcher to the new file inode instantly, ensuring zero configuration downtime.

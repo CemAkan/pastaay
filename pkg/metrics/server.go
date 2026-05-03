@@ -3,22 +3,33 @@ package metrics
 import (
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+var (
+	serverOnce sync.Once
+)
+
+// GetHandler returns the standard Prometheus HTTP handler.
+func GetHandler() http.Handler {
+	return promhttp.Handler()
+}
+
 // StartServer boots up an independent HTTP server to expose Prometheus metrics.
-// We run this on a separate port (e.g., ":2112") so it doesn't conflict with the main app.
 func StartServer(port string) {
-	mux := http.NewServeMux()
+	serverOnce.Do(func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", GetHandler())
 
-	// Bind the standard Prometheus scrape handler to the /metrics route
-	mux.Handle("/metrics", promhttp.Handler())
+		log.Printf("Pastaay: Metrics server listening on %s/metrics\n", port)
 
-	log.Printf("Pastaay: Metrics server listening on %s/metrics\n", port)
+		go func() {
 
-	// Start the HTTP server
-	if err := http.ListenAndServe(port, mux); err != nil {
-		log.Fatalf("Pastaay: Failed to start metrics server: %v", err)
-	}
+			if err := http.ListenAndServe(port, mux); err != nil && err != http.ErrServerClosed {
+				log.Printf("[ERROR] Pastaay: Metrics server failed on %s (Port in use?). Metrics disabled: %v\n", port, err)
+			}
+		}()
+	})
 }
