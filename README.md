@@ -12,11 +12,10 @@
 
 ## Core Features
 
-* **Universal Chaos:** Natively inject faults into Kafka, RabbitMQ, HTTP, gRPC, SQL, MongoDB, and Redis without changing your core application logic.
-* **Zero-Allocation Engine:** Policy evaluator with a thread-safe architecture. Built to survive high-throughput data streams without GC spikes.
-* **Smart & Surgical:** Target exact queries, topics, or routes (Case-Insensitive). Automatically protects database migrations (DDL) and container boot sequences.
-* **Amnesia-Proof Hot-Reloading:** Modify `pastaay.yaml` on the fly. Zero downtime, completely immune to Linux file-replace detachment.
-
+*   **Universal Chaos:** Kafka, RabbitMQ, HTTP, gRPC, SQL, MongoDB, and Redis support.
+*   **Security Hardened:** Native protection against multi-slash URL bypasses and SQL delimiter evasion.
+*   **Deterministic Cascading:** Complex gRPC stream rules that don't short-circuit.
+*   **Standardized Metrics:** Single-source-of-truth monitoring with `protocol:target` labeling.
 ---
 
 ## Hot-Reloading
@@ -44,11 +43,11 @@ Pastaay is built to survive high-throughput data streams. Our core evaluator gua
 
 ## Changelog
 
-| Version | Highlights | Impact |
-| :--- | :--- | :--- |
-| **v1.6.0** | **Message Brokers:** Kafka & RabbitMQ Interceptors for message queue chaos and event dropping. | Delivers zero-allocation message broker chaos for high-throughput distributed systems without GC spikes. |
+| Version | Highlights                                                                                                                                                                                                                                  | Impact |
+| :--- |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| :--- |
+| **v1.6.0** | **Message Brokers:** Kafka & RabbitMQ Interceptors. **Hardened Standard**: Unified `protocol:target` labels and Triple-slash evasion protection. Mongo Abort: Synchronous execution blocking.                                                 | Eliminates observability fragmentation and ensures zero-bypass security for ignore lists in high-throughput distributed systems.|
 | **v1.5.x** | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Amnesia-Proof Watcher:** Fixes Linux file-save detachment bugs.<br>**Double-Chaos Shield:** Guards against Go standard library fallbacks.<br>**Network Sabotage:** TCP `drop_connection`. | Achieves absolute structural perfection. Zero memory leaks, zero silent bypasses, and 100% accurate policy targeting in production. |
-| **v1.0 - v1.4** | HTTP Middleware, Redis Hooks, gRPC Interceptors, SQL Driver Wrapper, YAML Hot-Reloading, and Native Metrics. | Established the core chaos engine architecture, baseline protocols, and native observability. |
+| **v1.0 - v1.4** | HTTP Middleware, Redis Hooks, gRPC Interceptors, SQL Driver Wrapper, YAML Hot-Reloading, and Native Metrics.                                                                                                                                | Established the core chaos engine architecture, baseline protocols, and native observability. |
 
 <br>
 

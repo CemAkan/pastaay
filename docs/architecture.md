@@ -16,13 +16,16 @@ Before diving into the low-level memory operations and interceptor mechanics, he
 
 ---
 
-## 1. The Policy Engine & Concurrency
+## 1. The Policy Engine & Security Shield
 
-The biggest challenge in Chaos Engineering is ensuring the tool itself doesn't crash the host application.
+### Atomic Map Swap & Deterministic Logic
+Instead of evaluating the YAML file on every request, the `config.Manager` pre-computes routing maps. It now includes a **Deterministic Hash Engine** using a sorted PCG (Permuted Congruential Generator) to ensure stateful protocols like gRPC streams maintain consistency across the entire session.
 
-### The Atomic Map Swap
-Instead of evaluating the YAML file on every request, the `config.Manager` acts as an ultra-fast, thread-safe memory cache. It pre-computes a routing map: `map[string][]Policy`.
-When an interceptor asks for policies, it performs an `O(1)` map lookup.
+### The Security Evasion Shield
+Pastaay includes a multi-layered security shield to prevent chaos bypasses:
+*   **Triple-Slash Evasion:** The engine natively handles and normalizes multiple leading slashes (e.g., `////api/v1`) using aggressive path stripping, ensuring `ignored_commands` cannot be bypassed by malformed URLs.
+*   **SQL Delimiter Aggression:** The SQL cleaner now strips all standard SQL delimiters including `()`, `;`, and trailing whitespaces. A query like `(SELECT 1);` will be correctly identified as `SELECT 1` for ignore-list matching.
+
 
 ### Thread-Safe Evaluation & Lock-Free RNG
 To support high-throughput streams (like Kafka), Pastaay isolates the Random Number Generator natively. It uses Go's native, lock-free PCG (Permuted Congruential Generator) RNG engine from `math/rand/v2`. This completely eliminates the need for `sync.Mutex` locking, preventing the fatal race conditions and bottlenecks that occur when thousands of concurrent goroutines attempt to generate chaos events simultaneously, ensuring thread-safety with absolute zero latency.
@@ -63,7 +66,7 @@ subgraph MC [" "]
 direction TB
 L4["<b>3. MEMORY & CONFIGURATION</b>"]
 M1[("(Config Manager)")]
-M2["sync.RWMutex<br/>Atomic Map Swap"]
+M2["atomic.Pointer[T]<br/>Lock-Free Map Swap"]
 end
 end
 
@@ -130,10 +133,9 @@ Pastaay registers a custom driver (`sqlchaos.Register`) and implements the stand
 ### 2.3 Redis Pipelines: Pointer Memory Traps
 Injecting errors into a batch of pipelined Redis commands introduces significant slice memory challenges. Modifying a command via a traditional `for _, cmd := range cmds` loop creates a temporary copy, causing the error injection to silently vanish. Pastaay uses strict memory indexing (`cmds[i]`) and enforces a pre-execution chronological delay to guarantee that latency is applied *before* the physical wire message is sent.
 
-### 2.4 MongoDB & TCP Nuclear Locks
-Unlike SQL, Pastaay injects an `event.CommandMonitor` directly into MongoDB's native Driver (v2).
-For network sabotages (`drop_connection`), Pastaay hijacks the underlying `net.Dialer`. **Safeguard:** Dropping a physical TCP connection is catastrophic. Pastaay enforces a strict "Nuclear Lock", ensuring that TCP Drops can only be executed if the user explicitly targets `"all"` or `"database"`.
-
+### 2.4 MongoDB & Synchronous Blocking
+Unlike SQL, MongoDB's monitor hook does not allow returning a direct error. To simulate a hard fault:
+*   **Synchronous Execution Kill:** Pastaay blocks the `Started` hook until the caller's context is canceled. This forces the driver to timeout or return a `context canceled` error to the application, providing a realistic "Abort" simulation at the wire level.
 ---
 
 ## 3. Amnesia-Proof Daemon (Fault Tolerance)
@@ -150,7 +152,8 @@ Furthermore, strict YAML validation ensures that corrupted configurations trigge
 
 ---
 
-## 4. The Observability Pipeline (Prometheus)
+## 4. Standardized Observability (Prometheus)
 
-Pastaay includes native Prometheus instrumentation (`pastaay_injected_faults_total`).
-When a fault is injected, Pastaay increments the counter using atomic memory operations (`sync/atomic.AddUint64`), which execute at the hardware level in sub-nanoseconds. This means observability is entirely non-blocking and lock-free.
+To ensure high-fidelity Grafana dashboards, Pastaay v1.6.2 enforces a **Standardized Labeling Convention**:
+*   **Format:** `protocol:target` (e.g., `sql:all`, `kafka:orders.events`, `grpc:/Service/Method`).
+*   **Unified Tracking:** All faults (latency, drop, error) now use these consistent tags across all 7 supported protocols, eliminating data fragmentation in multi-protocol environments.ected, Pastaay increments the counter using atomic memory operations (`sync/atomic.AddUint64`), which execute at the hardware level in sub-nanoseconds. This means observability is entirely non-blocking and lock-free.

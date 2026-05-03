@@ -21,14 +21,11 @@ These settings govern the overall behavior of the Pastaay engine and protect you
 
 ### Deep Dive: Customizing `ignored_commands` & Anti-Bypass
 
-The `ignored_commands` field allows you to explicitly protect certain queries or commands from chaos injection.
-
 **Crucial Matching Rules:**
-1. **Case-Insensitive:** Pastaay automatically converts both your YAML rules and the incoming queries to `UPPERCASE` before comparing. `select` matches `SELECT` and `sElEcT`.
-2. **Prefix Matching:** Pastaay uses a prefix matching engine. If you ignore `"CREATE"`, it protects `"CREATE TABLE..."`, `"CREATE INDEX..."`, etc.
-3. **Advanced Anti-Bypass Scrubbing:** Pastaay strictly scrubs mixed SQL comments (e.g., `/* comment */`, `-- comment`) and whitespaces before evaluation. A query like `/* Bypass Attempt */ CREATE TABLE` will still be correctly identified and protected.
-
-**Complete Map Example:**
+1.  **Case-Insensitive:** All inputs are normalized to `UPPERCASE`.
+2.  **Aggressive Stripping:** Pastaay now strips surrounding delimiters like parentheses and semicolons. `(SELECT 1);` matches `SELECT 1`.
+3.  **Slash Normalization:** Leading slashes in HTTP/gRPC paths are normalized. `///api/ping` will match `api/ping` in your ignore list.
+    **Complete Map Example:**
 ```yaml
 enable_default_ignored: true
 ignored_commands:
@@ -68,6 +65,22 @@ Each policy in the `policies` list supports the following fields to precisely ta
 
 ---
 
+
+## Observability & Labels
+
+Every fault injected by Pastaay is reported to Prometheus. For granular filtering in Grafana, use the `protocol:target` format:
+
+| Protocol | Label Example | Target logic |
+| :--- | :--- | :--- |
+| **HTTP** | `http:/api/v1/login` | Normalized path. |
+| **SQL** | `sql:database` | Global or query-specific regex match. |
+| **gRPC** | `grpc:/pb.Svc/Method` | Full method name. |
+| **Kafka** | `kafka:topic_name` | Exact topic name. |
+| **RabbitMQ** | `rabbitmq:routing_key`| Exact routing key or queue. |
+| **Redis** | `redis:get` | Exact command name or `all`. |
+
+---
+
 ## Target Types & Granular Fault Behavior
 
 How Pastaay interprets faults depends entirely on the `type` of the policy.
@@ -85,9 +98,7 @@ How Pastaay interprets faults depends entirely on the `type` of the policy.
 * **Fault Behavior:** Injects latency at the event monitor level.
 
 ### 4. gRPC Chaos (`type: "grpc"`)
-* **Target Format:** Full Method Name (e.g., `/service.v1.MyService/MyMethod`). Evaluated Case-Insensitive.
-* **Fault Behavior:** Aborts the request returning a `codes.Unavailable` status.
-* **Stream RNG Mode:** `stream_roll_mode: "stream"` rolls once per stream and applies at most once per policy; `"message"` rolls per message.
+*   **Cascading Logic:** v1.6.0 supports non-short-circuiting rules. If a stream policy decides not to inject a fault, the engine continues to evaluate other matching policies for the same request.
 
 ### 5. Redis Chaos (`type: "redis"`)
 * **Target Format:** Specific command (e.g., `"get"`, `"set"`), or `"all"`.

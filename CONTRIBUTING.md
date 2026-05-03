@@ -49,7 +49,7 @@ By participating in this project, you are expected to uphold standard open-sourc
 Pastaay is designed to have **zero blocking overhead** when chaos is not actively triggered. To maintain this, please adhere to the following architectural rules:
 
 ### 1. The `config.Manager` is Sacred
-All configurations are read from a pre-computed `map[string][]Policy` guarded by a `sync.RWMutex`.
+All configurations are read from a pre-computed map[string][]Policy accessed via lock-free atomic.Pointer[T].
 * **Never** perform I/O operations or file reads inside an interceptor.
 * Always use `mgr.GetActivePolicies("your-protocol")` to retrieve policies in `O(1)` time.
 
