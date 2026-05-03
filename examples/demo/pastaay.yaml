@@ -1,22 +1,25 @@
 version: 1
 warmup_duration: "10s"
-enable_default_ignored: true # Automatically bypasses setup commands like CREATE, DROP, etc.
+enable_default_ignored: true
+
+ignored_commands:
+  sql:
+    - "SELECT 1"
+  kafka:
+    - "heartbeat"
 
 policies:
-  # 1. MongoDB: Forcefully drop physical connections
   - name: "mongo-kill-switch"
     type: "mongo"
     target: "all"
     drop_connection: true
 
-  # 2. SQL: Inject half a second latency to every query
   - name: "sql-latency"
     type: "sql"
     target: "database"
     latency_chance: 1.0
     latency_duration: "500ms"
 
-  # 3. HTTP: 50% chance to throw a 503 Service Unavailable
   - name: "http-random-fail"
     type: "http"
     target: "/api/v1/ping"
@@ -24,8 +27,19 @@ policies:
     error_code: 503
     error_body: '{"error": "Pastaay Chaos: System Overloaded"}'
 
-  # 4. Redis: 20% chance to simulate a Cache Miss (redis.Nil)
   - name: "redis-cache-miss"
     type: "redis"
     target: "all"
     error_chance: 0.2
+
+  - name: "kafka-consumer-lag"
+    type: "kafka"
+    target: "events.stream"
+    latency_chance: 0.5
+    latency_duration: "800ms"
+
+  - name: "rabbitmq-payment-drop"
+    type: "rabbitmq"
+    target: "chaos.queue"
+    drop_connection: true
+    error_chance: 0.3

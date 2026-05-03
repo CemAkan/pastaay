@@ -1,0 +1,13 @@
+version: 1
+warmup_duration: "10s"
+enable_default_ignored: true
+
+policies:
+  - name: "Ghost-Jitter"
+    type: "grpc"
+    target: "all"
+    latency_chance: 0
+    latency_duration: "300ms"
+    error_chance: 0
+    error_body: "SYNAPTIC_FAILURE_DETECTED"
+    stream_roll_mode: "stream"

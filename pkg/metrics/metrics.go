@@ -6,10 +6,11 @@ import (
 )
 
 // InjectedFaultsTotal tracks the number of chaos events injected by Pastaay.
+// Label "target" follows the "protocol:target" naming convention (e.g., "sql:all", "kafka:orders")
 var InjectedFaultsTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "pastaay_injected_faults_total",
-		Help: "The total number of injected faults (latency or error)",
+		Help: "The total number of injected faults (latency, drop, or error)",
 	},
-	[]string{"path", "fault_type"},
+	[]string{"target", "fault_type"},
 )
