@@ -43,3 +43,11 @@ policies:
     target: "chaos.queue"
     drop_connection: true
     error_chance: 0.3
+
+  - name: "system-meltdown"
+    type: "resource"
+    target: "host"
+    latency_duration: "15s"
+    throttle_threshold: 150000
+    ram_chunk_mb: 100
+    ram_interval: "1s"
