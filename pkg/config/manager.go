@@ -27,28 +27,46 @@ func NewManager(initialConfig *PastaayConfig) *Manager {
 
 func generateStableHash(p *Policy) uint64 {
 	var h uint64 = 14695981039346656037
+	// Separator function to prevent field merging collisions
+	sep := func() { h ^= 0; h *= 1099511628211 }
+
 	for _, s := range []string{p.Name, p.Target, p.Type, p.ErrorBody} {
 		for i := 0; i < len(s); i++ {
 			h ^= uint64(s[i])
 			h *= 1099511628211
 		}
+		sep()
 	}
-	var keys []string
-	for k := range p.MatchHeaders {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		v := p.MatchHeaders[k]
-		for i := 0; i < len(k); i++ {
-			h ^= uint64(k[i])
-			h *= 1099511628211
+
+	if len(p.MatchHeaders) > 0 {
+		keys := make([]string, 0, len(p.MatchHeaders))
+		for k := range p.MatchHeaders {
+			keys = append(keys, k)
 		}
-		for i := 0; i < len(v); i++ {
-			h ^= uint64(v[i])
-			h *= 1099511628211
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			v := p.MatchHeaders[k]
+			for i := 0; i < len(k); i++ {
+				h ^= uint64(k[i])
+				h *= 1099511628211
+			}
+			sep()
+			for i := 0; i < len(v); i++ {
+				h ^= uint64(v[i])
+				h *= 1099511628211
+			}
+			sep()
 		}
 	}
+
+	h ^= uint64(p.ThrottleThreshold)
+	h *= 1099511628211
+	h ^= uint64(p.RAMChunkMB)
+	h *= 1099511628211
+	h ^= uint64(p.RAMInterval)
+	h *= 1099511628211
+
 	h ^= uint64(p.LatencyDuration)
 	h *= 1099511628211
 	h ^= uint64(p.ErrorCode)

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.6-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.7-blue.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
@@ -16,6 +16,8 @@
 *   **Security Hardened:** Native protection against multi-slash URL bypasses and SQL delimiter evasion.
 *   **Deterministic Cascading:** Complex gRPC stream rules that don't short-circuit.
 *   **Standardized Metrics:** Single-source-of-truth monitoring with `protocol:target` labeling.
+*   **Resource Sabotage:** Simulate CPU starvation and memory leaks with guaranteed cleanup via the Amnesia Protocol.
+
 ---
 
 ## Hot-Reloading
@@ -43,10 +45,11 @@ Pastaay is built to survive high-throughput data streams. Our core evaluator gua
 
 ## Changelog
 
-| Version | Highlights                                                                                                                                                                                                                                  | Impact |
-| :--- |:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| :--- |
-| **v1.6.0** | **Message Brokers:** Kafka & RabbitMQ Interceptors. **Hardened Standard**: Unified `protocol:target` labels and Triple-slash evasion protection. Mongo Abort: Synchronous execution blocking.                                                 | Eliminates observability fragmentation and ensures zero-bypass security for ignore lists in high-throughput distributed systems.|
-| **v1.5.x** | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Amnesia-Proof Watcher:** Fixes Linux file-save detachment bugs.<br>**Double-Chaos Shield:** Guards against Go standard library fallbacks.<br>**Network Sabotage:** TCP `drop_connection`. | Achieves absolute structural perfection. Zero memory leaks, zero silent bypasses, and 100% accurate policy targeting in production. |
+| Version         | Highlights                                                                                                                                                                                                                                  | Impact |
+|:----------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------| :--- |
+| **v1.7**        | **Resource Sabotage:** CPU Stressors and RAM Bloaters to simulate memory leaks and compute starvation. |Identifies critical failure points during hardware pressure; verifies resource limit efficiency and ensures zero-footprint recovery via Amnesia Protocol.   |
+| **v1.6.0**      | **Message Brokers:** Kafka & RabbitMQ Interceptors. **Hardened Standard**: Unified `protocol:target` labels and Triple-slash evasion protection. Mongo Abort: Synchronous execution blocking.                                                 | Eliminates observability fragmentation and ensures zero-bypass security for ignore lists in high-throughput distributed systems.|
+| **v1.5.x**      | **Smart Mode:** Warmup Shield & DDL Ignorer.<br>**Amnesia-Proof Watcher:** Fixes Linux file-save detachment bugs.<br>**Double-Chaos Shield:** Guards against Go standard library fallbacks.<br>**Network Sabotage:** TCP `drop_connection`. | Achieves absolute structural perfection. Zero memory leaks, zero silent bypasses, and 100% accurate policy targeting in production. |
 | **v1.0 - v1.4** | HTTP Middleware, Redis Hooks, gRPC Interceptors, SQL Driver Wrapper, YAML Hot-Reloading, and Native Metrics.                                                                                                                                | Established the core chaos engine architecture, baseline protocols, and native observability. |
 
 <br>
@@ -162,9 +165,8 @@ Pastaay is rapidly evolving into a full-fledged enterprise chaos engineering sui
 
 | Version | Planned Features | Status       |
 | :--- | :--- |:-------------|
-| **v1.7** | **Resource Sabotage:** CPU Stressors and RAM Bloaters to simulate memory leaks and compute starvation. |  In Progress |
-| **v1.8** | **Advanced Observability:** Distributed Tracing (OpenTelemetry) integration and latency percentile graphing. | Planned      |
-| **v1.9** | **Cloud & Low-Level:** AWS Fault Injection Simulator (FIS) hooking and eBPF-based packet dropping without code changes. | Conceptual   |
+| **v1.8** | **Advanced Observability:** Distributed Tracing (OpenTelemetry) integration and latency percentile graphing. | In Progress      |
+| **v1.9** | **Cloud & Low-Level:** AWS Fault Injection Simulator (FIS) hooking and eBPF-based packet dropping without code changes. | Planned    |
 | **v2.0** | **The Enterprise Suite:** Kubernetes Operator (`pastaay-operator` via CRDs), CLI Tool (`pastaay-cli`), and a real-time Web Dashboard UI. | Conceptual   |
 
 <br>

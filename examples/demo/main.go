@@ -18,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/CemAkan/pastaay/pkg/brokerchaos"
+	"github.com/CemAkan/pastaay/pkg/chaos"
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
 	"github.com/CemAkan/pastaay/pkg/mongochaos"
@@ -42,7 +43,8 @@ func (b *brokerAdapter) IsCommandIgnored(protocol string, cmd string) bool {
 func main() {
 	log.Println("[INFO] PASTAAY DEMO STARTING")
 
-	cfgPath := "pastaay.yaml"
+	// FIX: Docker-Compose'dan okuyabilmek için env kontrolü eklendi
+	cfgPath := getEnv("CONFIG_PATH", "pastaay.yaml")
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		log.Fatalf("[FATAL] CONFIG LOAD ERROR: %v", err)
@@ -53,18 +55,18 @@ func main() {
 
 	go metrics.StartServer(":2112")
 
-	//  Redis Setup
+	// Redis Setup
 	rdb := redis.NewClient(&redis.Options{
 		Addr:   getEnv("REDIS_ADDR", "redis:6379"),
 		Dialer: redischaos.NewChaosDialer(cfgManager, nil),
 	})
 	rdb.AddHook(redischaos.NewChaosHook(cfgManager))
 
-	//  SQL Setup
+	// SQL Setup
 	sqlchaos.Register("pastaay-postgres", &pq.Driver{}, cfgManager)
 	db, _ := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@db:5432/shortener?sslmode=disable"))
 
-	//  Mongo Setup
+	// Mongo Setup
 	mOpts := options.Client().ApplyURI(getEnv("MONGO_URI", "mongodb://mongo:27017"))
 	mongochaos.ApplyChaos(mOpts, cfgManager)
 	mClient, _ := mongo.Connect(mOpts)
@@ -72,7 +74,7 @@ func main() {
 	kafkaEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "kafka"})
 	rabbitEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "rabbitmq"})
 
-	//  Kafka Setup
+	// Kafka Setup
 	go func() {
 		kafkaAddr := getEnv("KAFKA_ADDR", "redpanda:9092")
 
@@ -100,6 +102,17 @@ func main() {
 			return
 		}
 
+		go func() {
+			for {
+				_, _, err := prod.SendMessage(&sarama.ProducerMessage{Topic: "events.stream", Value: sarama.StringEncoder("payload")})
+				if err != nil {
+					log.Printf("[ERROR] Producer send failed: %v", err)
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}()
+		time.Sleep(3 * time.Second) // Wait for topic creation
+
 		cons, err := sarama.NewConsumerFromClient(kc)
 		if err != nil {
 			log.Printf("[ERROR] Kafka consumer error: %v", err)
@@ -114,18 +127,6 @@ func main() {
 
 		mid := brokerchaos.NewKafkaConsumerMiddleware(kafkaEval)
 
-		// Dummy Producer
-		go func() {
-			for {
-				_, _, err := prod.SendMessage(&sarama.ProducerMessage{Topic: "events.stream", Value: sarama.StringEncoder("payload")})
-				if err != nil {
-					log.Printf("[ERROR] Producer send failed: %v", err)
-				}
-				time.Sleep(2 * time.Second)
-			}
-		}()
-
-		// Chaos Consumer
 		for m := range pc.Messages() {
 			drp, _ := mid.Intercept(context.Background(), m)
 			if drp {
@@ -136,7 +137,7 @@ func main() {
 		}
 	}()
 
-	//  RabbitMQ Setup
+	// RabbitMQ Setup
 	go func() {
 		rabbitURL := getEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 		var conn *amqp.Connection
@@ -174,7 +175,6 @@ func main() {
 
 		mid := brokerchaos.NewRabbitMQMiddleware(rabbitEval)
 
-		// Dummy Publisher
 		go func() {
 			for {
 				err := ch.PublishWithContext(context.Background(), "", q.Name, false, false, amqp.Publishing{Body: []byte("payload")})
@@ -185,7 +185,6 @@ func main() {
 			}
 		}()
 
-		// Chaos Consumer
 		for d := range msgs {
 			drp, _ := mid.Intercept(context.Background(), &d)
 			if drp {
@@ -196,7 +195,7 @@ func main() {
 		}
 	}()
 
-	//  HTTP API
+	// HTTP API
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		if err := mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}}).Err(); err != nil {
@@ -221,7 +220,41 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "PONG"})
 	})
 
-	//  Dummy HTTP Traffic Generator
+	// Resource Sabotage Endpoint
+	mux.HandleFunc("/sabotage/resources", func(w http.ResponseWriter, r *http.Request) {
+		policies := cfgManager.GetActivePolicies("resource")
+		if len(policies) == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"status": "ignored", "reason": "no resource policy found in yaml"}`))
+			return
+		}
+
+		p := policies[0]
+		policy := chaos.ResourcePolicy{}
+
+		// CPU
+		policy.CPU.Enabled = true
+		policy.CPU.Cores = 0
+		policy.CPU.Duration = p.LatencyDuration
+		policy.CPU.ThrottleThreshold = p.ThrottleThreshold
+
+		// RAM
+		policy.RAM.Enabled = true
+		policy.RAM.ChunkMB = p.RAMChunkMB
+		policy.RAM.Interval = p.RAMInterval
+		policy.RAM.Duration = p.LatencyDuration
+
+		chaos.TriggerResourceSabotage(policy)
+
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":   "chaos_injected",
+			"policy":   p.Name,
+			"target":   p.Target,
+			"duration": p.LatencyDuration.String(),
+		})
+	})
+
 	go func() {
 		time.Sleep(5 * time.Second)
 		client := &http.Client{Timeout: 2 * time.Second}
