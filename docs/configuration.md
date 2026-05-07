@@ -48,18 +48,21 @@ ignored_commands:
 
 Each policy in the `policies` list supports the following fields to precisely target and execute chaos:
 
-| Field | Type | Required | Description                                                                                                     |
-| :--- | :--- | :--- |:----------------------------------------------------------------------------------------------------------------|
-| `name` | `string` | No | A unique identifier for the policy (useful for debugging).                                                      |
-| `type` | `string` | **Yes** | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`,`kafka`,`rabbitmq`.                                   |
-| `target` | `string` | **Yes** | Endpoint, route, or specific query to target. **Strictly Case-Insensitive.**                                    |
-| `latency_chance` | `float` | No | Probability (0.0 to 1.0) of injecting latency.                                                                  |
-| `latency_duration`| `string` | No | Delay duration (e.g., `500ms`, `2s`).                                                                           |
-| `error_chance` | `float` | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault.                                                  |
-| `error_code` | `int` | No | Custom HTTP/gRPC Status Code *(type: http/grpc only)*.                                                          |
-| `error_body` | `string` | No | Custom response/error message.                                                                                  |
-| `drop_connection`| `bool` | No | Forcefully rejects the TCP dial connection. **Safeguard: Requires `target: "all"` or `"database"` to execute.** |
-| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control.                                                                       |
+| Field                | Type     | Required | Description                                                                                                                                                          |
+|:---------------------|:---------| :--- |:---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `name`               | `string` | No | A unique identifier for the policy (useful for debugging).                                                                                                           |
+| `type`               | `string` | **Yes** | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`,`kafka`,`rabbitmq`.                                                                                        |
+| `target`             | `string` | **Yes** | Endpoint, route, or specific query to target. **Strictly Case-Insensitive.**                                                                                         |
+| `latency_chance`     | `float`  | No | Probability (0.0 to 1.0) of injecting latency.                                                                                                                       |
+| `latency_duration` | `string` | No | **Protocols:** Request delay duration (e.g., `500ms`). <br> **Resource:** Total attack duration before Amnesia cleanup (e.g., `15s`). |
+| `error_chance`       | `float`  | No | Probability (0.0 to 1.0) of injecting a synthetic error/fault.                                                                                                       |
+| `error_code`         | `int`    | No | Custom HTTP/gRPC Status Code *(type: http/grpc only)*.                                                                                                               |
+| `error_body`         | `string` | No | Custom response/error message.                                                                                                                                       |
+| `drop_connection`    | `bool`   | No | Forcefully rejects the TCP dial connection. **Safeguard: Requires `target: "all"` or `"database"` to execute.**                                                      |
+| `match_headers`      | `map`    | No | Key-value pairs for Blast Radius Control.                                                                                                                            |
+| `throttle_threshold`| `int` | No | CPU intensity (hashes per context check). Default: `100,000`. |
+| `ram_chunk_mb` | `int` | No | Physical RAM allocation size per interval (MB). |
+| `ram_interval` | `string` | No | Frequency of memory allocation (e.g., `"1s"`). |
 
 <br>
 
@@ -111,6 +114,13 @@ How Pastaay interprets faults depends entirely on the `type` of the policy.
 ### 7. RabbitMQ Chaos (`type: "rabbitmq"`)
 * **Target Format:** Routing Key, Exchange, or Queue Name (e.g., `"payment.processed"`), or `"all"`.
 * **Fault Behavior:** Mirrors Kafka behavior. Uses zero-allocation header extraction and enforces strict type-assertion on AMQP headers to guarantee the Chaos Engine never triggers a Go runtime panic.
+
+### 8. Resource Chaos (`type: "resource"`)
+Direct host environment manipulation with guaranteed cleanup:
+* **Target Format:** Use `"host"` or `"system"`.
+* **Attack Timer:** Controlled by `latency_duration`.
+* **Zero-Footprint:** The **Amnesia Protocol** triggers `runtime.GC()` to reclaim all leaked RAM instantly after duration expires.
+
 ---
 
 ## Cascading Rules

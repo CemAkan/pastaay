@@ -33,81 +33,86 @@ To support high-throughput streams (like Kafka), Pastaay isolates the Random Num
 ### Engine Internals
 
 ```mermaid
-graph TD
-    subgraph "Host Application"
+graph LR
+    subgraph HOST ["Host Application & Environment"]
+        direction TB
         A["Kafka / RabbitMQ Consumer"]
         B["Database/SQL Client"]
         C["Redis/Mongo Client"]
         D["HTTP / gRPC Service"]
+        H["<b>OS Resources (CPU/RAM)</b>"]
     end
 
-subgraph PE [" "]
-direction TB
-L1["<b>PASTAAY ENGINE</b>"]
+    subgraph PE ["PASTAAY ENGINE (v1.7)"]
+        direction TB
 
-subgraph IL [" "]
-direction TB
-L2["<b>1. INTERCEPTOR LAYER (ZERO-ALLOCATION)</b>"]
-I1["Broker Middleware<br/>Extracts Metadata Only"]
-I2["SQL Driver Wrapper<br/>Fallback Evasion Shield"]
-I3["Mongo Monitor / Redis Hook<br/>Command Interception"]
-I4["API Middleware<br/>Request & Context Control"]
-end
+        subgraph IL ["1. INTERCEPTOR LAYER (ZERO-ALLOCATION)"]
+            direction TB
+            I1["Broker Middleware<br/>Extracts Metadata Only"]
+            I1 ~~~ I2
+            I2["SQL Driver Wrapper<br/>Fallback Evasion Shield"]
+            I2 ~~~ I3
+            I3["NoSQL Monitor/Hook<br/>Command Interception"]
+            I3 ~~~ I4
+            I4["API Middleware<br/>Request & Context Control"]
+            I4 ~~~ I5
+            I5["<b>Resource Sabotage Trigger</b><br/>Intensity & Threshold Control"]
+        end
 
-subgraph CE [" "]
-direction TB
-L3["<b>2. CORE EVALUATOR</b>"]
-E1{"O(1) Policy Lookup"}
-E2["Lock-Free RNG<br/>Eliminates Global Locking"]
-E3["Context-Aware Delayer<br/>Graceful Shutdown Safe"]
-end
+        subgraph CE ["2. CORE EVALUATOR"]
+            direction TB
+            E1{"O(1) Policy Lookup"}
+            subgraph CE_RES ["Resource Sabotage Units"]
+                E4["<b>CPU Burner</b><br/>Lock-Free PCG Control"]
+                E5["<b>RAM Leaker</b><br/>Page-Forcing Vector"]
+            end
+            E2["Lock-Free RNG"]
+            E3["Context Delayer"]
+        end
 
-subgraph MC [" "]
-direction TB
-L4["<b>3. MEMORY & CONFIGURATION</b>"]
-M1[("(Config Manager)")]
-M2["atomic.Pointer[T]<br/>Lock-Free Map Swap"]
-end
-end
+        subgraph MC ["3. MEMORY & CONFIGURATION"]
+            direction TB
+            M1[("(Config Manager)")]
+            M2["atomic.Pointer[T]"]
+        end
+    end
 
-subgraph FS [" "]
-direction TB
-L5["<b>FILE SYSTEM</b>"]
-F1["pastaay.yaml"]
-F2["Amnesia-Proof Watcher<br/>fsnotify + Retry Loop"]
-end
+    subgraph FS ["FILE SYSTEM"]
+        direction TB
+        F1["pastaay.yaml"]
+        F2["Amnesia-Proof Watcher"]
+    end
 
-%% Connections
-A -.->|Headers/Topic| I1
-B -.->|Query Context| I2
-C -.->|Command Target| I3
-D -.->|Path / Method| I4
+%% -- CLEAN VERTICAL CONNECTIONS --
+    A -.-> I1
+    B -.-> I2
+    C -.-> I3
+    D -.-> I4
 
-I1 --> E1
-I2 --> E1
-I3 --> E1
-I4 --> E1
+    I1 & I2 & I3 & I4 --> E1
+    I5 ==>|Intensity| E4
+    I5 ==>|Chunk/Interval| E5
 
-E1 <--> E2
-E1 --> E3
-E1 ==>|Reads Cache| M1
+    E1 <--> E2
+    E1 --> E3
+    E1 ==>|Reads| M1
 
-F1 -->|File Save/Replace| F2
-F2 -->|Hot Reload Trigger| M2
-M2 ==>|Updates Cache| M1
+    E4 & E5 -.->|Sabotage| H
 
+    F1 --> F2
+    F2 --> M2
+    M2 ==>|Updates| M1
 
-classDef interceptor fill:#f9f5d7,stroke:#b57614,stroke-width:2px,color:#3c3836;
-classDef evaluator fill:#d3e8e1,stroke:#076678,stroke-width:2px,color:#3c3836;
-classDef memory fill:#e2d3e8,stroke:#8f3f71,stroke-width:2px,color:#3c3836;
-classDef filesystem fill:#d5e8d3,stroke:#427b58,stroke-width:2px,color:#3c3836;
-classDef header fill:none,stroke:none,font-size:14px,font-weight:bold;
+%% Styling
+    classDef interceptor fill:#f9f5d7,stroke:#b57614,stroke-width:2px,color:#3c3836;
+    classDef evaluator fill:#d3e8e1,stroke:#076678,stroke-width:2px,color:#3c3836;
+    classDef memory fill:#e2d3e8,stroke:#8f3f71,stroke-width:2px,color:#3c3836;
+    classDef filesystem fill:#d5e8d3,stroke:#427b58,stroke-width:2px,color:#3c3836;
 
-class I1,I2,I3,I4 interceptor;
-class E1,E2,E3 evaluator;
-class M1,M2 memory;
-class F1,F2 filesystem;
-class L1,L2,L3,L4,L5 header;
+    class I1,I2,I3,I4,I5 interceptor;
+    class E1,E2,E3,E4,E5 evaluator;
+    class M1,M2 memory;
+    class F1,F2 filesystem;
 ```
 
 ---
@@ -157,3 +162,9 @@ Furthermore, strict YAML validation ensures that corrupted configurations trigge
 To ensure high-fidelity Grafana dashboards, Pastaay v1.6.2 enforces a **Standardized Labeling Convention**:
 *   **Format:** `protocol:target` (e.g., `sql:all`, `kafka:orders.events`, `grpc:/Service/Method`).
 *   **Unified Tracking:** All faults (latency, drop, error) now use these consistent tags across all 7 supported protocols, eliminating data fragmentation in multi-protocol environments.ected, Pastaay increments the counter using atomic memory operations (`sync/atomic.AddUint64`), which execute at the hardware level in sub-nanoseconds. This means observability is entirely non-blocking and lock-free.
+
+## 5. OS-Level Resource Sabotage (v1.7)
+Low-level resource exhaustion that bypasses standard OS and Compiler optimizations:
+* **Demand Paging Evasion:** Standard allocations are lazy. Pastaay forces physical RAM allocation by writing to every 4KB page boundary, bypassing kernel-level optimizations.
+* **Amnesia Protocol:** To ensure zero-footprint, resource goroutines use local pools. Upon context cancellation, pointers are nulled and `runtime.GC()` is invoked for immediate reclamation.
+* **Lock-Free CPU Stress:** Uses a tight loop with a configurable `throttle_threshold` for consistent stress without context-switching overhead.
