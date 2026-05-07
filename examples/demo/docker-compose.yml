@@ -3,10 +3,16 @@ services:
     build:
       context: ../../
       dockerfile: examples/demo/Dockerfile
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 1024M
     ports:
       - "8080:8080"
       - "2112:2112"
     environment:
+      - CONFIG_PATH=/root/config/pastaay.yaml
       - REDIS_ADDR=redis:6379
       - DB_DSN=postgres://pastaay:secret@db:5432/shortener?sslmode=disable
       - MONGO_URI=mongodb://mongo:27017
