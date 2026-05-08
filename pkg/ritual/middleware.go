@@ -8,6 +8,7 @@ import (
 
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
 func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
@@ -23,18 +24,24 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 					metricTag := "http:" + p.Target
 					if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 						metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
+						ctx, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.latency", p.Target, "latency")
+
 						timer := time.NewTimer(p.LatencyDuration)
 						select {
 						case <-timer.C:
 							timer.Stop()
-						case <-r.Context().Done():
+							span.End()
+						case <-ctx.Done():
 							timer.Stop()
+							span.End()
 							w.WriteHeader(499)
 							return
 						}
 					}
 					if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 						metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
+						_, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.error", p.Target, "error")
+
 						status := p.ErrorCode
 						if status == 0 {
 							status = http.StatusInternalServerError
@@ -42,6 +49,7 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 						w.Header().Set("Content-Type", "application/json")
 						w.WriteHeader(status)
 						w.Write([]byte(p.ErrorBody))
+						span.End()
 						return
 					}
 				}

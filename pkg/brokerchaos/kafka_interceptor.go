@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/tracing"
 	"github.com/IBM/sarama"
 )
 
@@ -49,22 +50,30 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 
 	if delay > 0 {
 		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
+		spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.latency", msg.Topic, "latency")
+
 		timer := time.NewTimer(delay)
 		select {
 		case <-timer.C:
 			timer.Stop()
-		case <-ctx.Done():
+			span.End()
+		case <-spanCtx.Done():
 			timer.Stop()
-			return false, ctx.Err()
+			span.End()
+			return false, spanCtx.Err()
 		}
 	}
 
 	if shouldDrop {
 		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "drop").Inc()
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.drop", msg.Topic, "drop")
+		span.End()
 		return true, nil
 	}
 	if evalErr != nil {
 		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.error", msg.Topic, "error")
+		span.End()
 		return true, evalErr
 	}
 
