@@ -27,10 +27,10 @@ func NewManager(initialConfig *PastaayConfig) *Manager {
 
 func generateStableHash(p *Policy) uint64 {
 	var h uint64 = 14695981039346656037
-	// Separator function to prevent field merging collisions
 	sep := func() { h ^= 0; h *= 1099511628211 }
 
-	for _, s := range []string{p.Name, p.Target, p.Type, p.ErrorBody} {
+	// Essential policy strings
+	for _, s := range []string{p.Name, p.Target, p.Type, p.ErrorBody, p.StreamRollMode} {
 		for i := 0; i < len(s); i++ {
 			h ^= uint64(s[i])
 			h *= 1099511628211
@@ -38,13 +38,37 @@ func generateStableHash(p *Policy) uint64 {
 		sep()
 	}
 
+	// Boolean state change must trigger re-roll
+	if p.DropConnection {
+		h ^= 1
+	} else {
+		h ^= 0
+	}
+	h *= 1099511628211
+
+	// Numeric & Probability fields
+	h ^= uint64(p.ThrottleThreshold)
+	h *= 1099511628211
+	h ^= uint64(p.RAMChunkMB)
+	h *= 1099511628211
+	h ^= uint64(p.RAMInterval)
+	h *= 1099511628211
+	h ^= uint64(p.LatencyDuration)
+	h *= 1099511628211
+	h ^= uint64(p.ErrorCode)
+	h *= 1099511628211
+	h ^= math.Float64bits(p.LatencyChance)
+	h *= 1099511628211
+	h ^= math.Float64bits(p.ErrorChance)
+	h *= 1099511628211
+
+	// Metadata headers
 	if len(p.MatchHeaders) > 0 {
 		keys := make([]string, 0, len(p.MatchHeaders))
 		for k := range p.MatchHeaders {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-
 		for _, k := range keys {
 			v := p.MatchHeaders[k]
 			for i := 0; i < len(k); i++ {
@@ -59,22 +83,6 @@ func generateStableHash(p *Policy) uint64 {
 			sep()
 		}
 	}
-
-	h ^= uint64(p.ThrottleThreshold)
-	h *= 1099511628211
-	h ^= uint64(p.RAMChunkMB)
-	h *= 1099511628211
-	h ^= uint64(p.RAMInterval)
-	h *= 1099511628211
-
-	h ^= uint64(p.LatencyDuration)
-	h *= 1099511628211
-	h ^= uint64(p.ErrorCode)
-	h *= 1099511628211
-	h ^= math.Float64bits(p.LatencyChance)
-	h *= 1099511628211
-	h ^= math.Float64bits(p.ErrorChance)
-	h *= 1099511628211
 	return h
 }
 
