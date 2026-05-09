@@ -4,61 +4,74 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
-	"log"
 	"math/rand/v2"
 	"strings"
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
 type chaosKey struct{}
+
 type WrapperConn struct {
 	originalConn driver.Conn
 	cfgManager   *config.Manager
 }
+
 type WrapperStmt struct {
 	originalStmt driver.Stmt
 	cleanQuery   string
 	cfgManager   *config.Manager
 }
 
+type WrapperTx struct {
+	originalTx driver.Tx
+	cfgManager *config.Manager
+}
+
+func (t *WrapperTx) Commit() error   { return t.originalTx.Commit() }
+func (t *WrapperTx) Rollback() error { return t.originalTx.Rollback() }
+
 func applySQLChaos(ctx context.Context, mgr *config.Manager, cleanQuery string) (context.Context, error) {
+
 	if ctx.Value(chaosKey{}) != nil || mgr.IsCleanCommandIgnored("sql", cleanQuery) {
 		return ctx, nil
 	}
 
 	policies := mgr.GetActivePolicies("sql")
 	currentCtx := ctx
-	marked := false
 
 	for _, p := range policies {
 		if isTargetMatch(cleanQuery, &p) {
-			if !marked {
-				currentCtx = context.WithValue(currentCtx, chaosKey{}, true)
-				marked = true
-			}
+			evalCtx := context.WithValue(currentCtx, chaosKey{}, true)
 			metricTag := "sql:" + p.Target
+
 			if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
-				log.Printf("[Pastaay-SQL] Latency: delaying query by %v", p.LatencyDuration)
+				spanCtx, span := tracing.StartChaosSpan(evalCtx, "pastaay.sql.latency", p.Target, "latency")
+
 				timer := time.NewTimer(p.LatencyDuration)
 				select {
 				case <-timer.C:
 					timer.Stop()
-				case <-currentCtx.Done():
+					span.End()
+				case <-spanCtx.Done():
 					timer.Stop()
-					return currentCtx, currentCtx.Err()
+					span.End()
+					return spanCtx, spanCtx.Err()
 				}
 			}
 			if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
+				_, span := tracing.StartChaosSpan(evalCtx, "pastaay.sql.error", p.Target, "error")
+				span.End()
 				msg := p.ErrorBody
 				if msg == "" {
 					msg = "sql: database connection is closed"
 				}
-				return currentCtx, errors.New(msg)
+				return evalCtx, errors.New(msg)
 			}
 		}
 	}
@@ -99,23 +112,26 @@ func (c *WrapperConn) ExecContext(ctx context.Context, query string, args []driv
 }
 
 func (c *WrapperConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	newCtx, err := applySQLChaos(ctx, c.cfgManager, "BEGIN")
-	if err != nil && !errors.Is(err, ctx.Err()) {
-		err = nil
+	if _, err := applySQLChaos(ctx, c.cfgManager, "BEGIN"); err != nil {
+		return nil, err
 	}
 	if bt, ok := c.originalConn.(driver.ConnBeginTx); ok {
-		return bt.BeginTx(newCtx, opts)
+		tx, err := bt.BeginTx(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		return &WrapperTx{originalTx: tx, cfgManager: c.cfgManager}, nil
 	}
-	return c.originalConn.Begin()
-}
-
-func (c *WrapperConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
-	newCtx, err := applySQLChaos(ctx, c.cfgManager, config.CleanSQLCommand(query))
+	tx, err := c.originalConn.Begin()
 	if err != nil {
 		return nil, err
 	}
+	return &WrapperTx{originalTx: tx, cfgManager: c.cfgManager}, nil
+}
+
+func (c *WrapperConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
 	if pc, ok := c.originalConn.(driver.ConnPrepareContext); ok {
-		stmt, err := pc.PrepareContext(newCtx, query)
+		stmt, err := pc.PrepareContext(ctx, query)
 		if err != nil {
 			return nil, err
 		}
@@ -139,6 +155,7 @@ func (c *WrapperConn) Begin() (driver.Tx, error) {
 
 func (s *WrapperStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	if ec, ok := s.originalStmt.(driver.StmtExecContext); ok {
+
 		newCtx, err := applySQLChaos(ctx, s.cfgManager, s.cleanQuery)
 		if err != nil {
 			return nil, err
@@ -160,16 +177,14 @@ func (s *WrapperStmt) QueryContext(ctx context.Context, args []driver.NamedValue
 }
 
 func (s *WrapperStmt) Exec(args []driver.Value) (driver.Result, error) {
-	_, err := applySQLChaos(context.Background(), s.cfgManager, s.cleanQuery)
-	if err != nil {
+	if _, err := applySQLChaos(context.Background(), s.cfgManager, s.cleanQuery); err != nil {
 		return nil, err
 	}
 	return s.originalStmt.Exec(args)
 }
 
 func (s *WrapperStmt) Query(args []driver.Value) (driver.Rows, error) {
-	_, err := applySQLChaos(context.Background(), s.cfgManager, s.cleanQuery)
-	if err != nil {
+	if _, err := applySQLChaos(context.Background(), s.cfgManager, s.cleanQuery); err != nil {
 		return nil, err
 	}
 	return s.originalStmt.Query(args)

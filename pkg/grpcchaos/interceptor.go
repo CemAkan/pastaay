@@ -14,11 +14,13 @@ import (
 
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
 type PolicyDecision struct {
 	Latency time.Duration
 	Err     error
+	Hash    uint64
 }
 
 type chaosServerStream struct {
@@ -26,7 +28,7 @@ type chaosServerStream struct {
 	method          string
 	cfgManager      *config.Manager
 	mu              sync.Mutex
-	decidedPolicies map[uint64]PolicyDecision
+	decidedPolicies map[string]PolicyDecision
 	isIgnored       bool
 	incomingMD      metadata.MD
 }
@@ -50,31 +52,41 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 			matchMetadataPure(s.incomingMD, p.MatchHeaders) {
 
 			var decision PolicyDecision
-			fp := p.PolicyHash
 			isStreamMode := strings.EqualFold(p.StreamRollMode, "stream")
 
 			if isStreamMode && s.decidedPolicies != nil {
 				s.mu.Lock()
-				d, decided := s.decidedPolicies[fp]
-				if decided {
+				d, decided := s.decidedPolicies[p.Name]
+
+				// Detect hot-reload by comparing cached fingerprint hashes
+				if decided && d.Hash == p.PolicyHash {
 					s.mu.Unlock()
 					if d.Latency > 0 {
-						if err := waitContext(ctx, d.Latency); err != nil {
+						spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.latency", s.method, "latency")
+						if err := waitContext(spanCtx, d.Latency); err != nil {
+							span.End()
 							return err
 						}
+						span.End()
 					}
 					if d.Err != nil {
+						_, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.error", s.method, "error")
+						span.End()
 						return d.Err
 					}
 					continue
 				}
+
+				// Re-roll if policy is new or configuration changed
 				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 					decision.Latency = p.LatencyDuration
 				}
 				if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 					decision.Err = generateError(p)
 				}
-				s.decidedPolicies[fp] = decision
+				decision.Hash = p.PolicyHash
+
+				s.decidedPolicies[p.Name] = decision
 				s.mu.Unlock()
 			} else {
 				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
@@ -88,12 +100,17 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 			metricTag := "grpc:" + s.method
 			if decision.Latency > 0 {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
-				if err := waitContext(ctx, decision.Latency); err != nil {
+				spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.latency", s.method, "latency")
+				if err := waitContext(spanCtx, decision.Latency); err != nil {
+					span.End()
 					return err
 				}
+				span.End()
 			}
 			if decision.Err != nil {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
+				_, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.error", s.method, "error")
+				span.End()
 				return decision.Err
 			}
 		}
@@ -176,7 +193,7 @@ func StreamInterceptor(mgr *config.Manager) grpc.StreamServerInterceptor {
 			ServerStream:    ss,
 			method:          info.FullMethod,
 			cfgManager:      mgr,
-			decidedPolicies: make(map[uint64]PolicyDecision),
+			decidedPolicies: make(map[string]PolicyDecision),
 			isIgnored:       mgr.IsCommandIgnored("grpc", info.FullMethod),
 			incomingMD:      md,
 		}
