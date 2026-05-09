@@ -66,7 +66,7 @@ Each policy in the `policies` list supports the following fields to precisely ta
 | `throttle_threshold` | `int`    | No | CPU intensity (hashes per context check). Default: `100,000`.                                                                                                          |
 | `ram_chunk_mb`       | `int`    | No | Physical RAM allocation size per interval (MB).                                                                                                                        |
 | `ram_interval`       | `string` | No | Frequency of memory allocation (e.g., `"1s"`).                                                                                                                         |
-
+| `stream_roll_mode`   | `string` | No | gRPC only. Dictates RNG evaluation frequency (`stream` or `message`). Default: `stream`.                                                              |
 
 <br>
 
@@ -139,11 +139,14 @@ How Pastaay interprets faults depends entirely on the `type` of the policy.
 * **Fault Behavior:** Injects latency at the event monitor level.
 
 ### 4. gRPC Chaos (`type: "grpc"`)
-Unlike request-response protocols, gRPC streams require consistency. v1.6.0 uses FNV-1a Fingerprinting to ensure policy stability.
+Unlike request-response protocols, long-lived gRPC streams require deterministic consistency to avoid breaking application-level state machines.
 
-* **Per-Stream Dice**: When `stream_roll_mode: "stream"` is used, the "Chaos Fate" is decided only once when the stream is initialized. This prevents long-lived streams from "flickering" between normal and chaotic states.
-* **Fingerprint Consistency**: Even during a `hot-reload`, the engine uses the FNV-1a hash to ensure running streams maintain their original behavior.
+The `stream_roll_mode` configuration dictates when the Chaos Engine "rolls the dice":
+* **`stream` (Default):** The lock-free RNG is evaluated exactly *once* at the initiation of the stream. The decision is cached. This is the safest way to simulate total link failure without triggering illegal state transitions in the Go gRPC runtime.
+* **`message`:** The RNG is evaluated independently for *every* `SendMsg` or `RecvMsg` call. Ideal for simulating sporadic jitter or intermittent packet loss.
 
+**FNV-1a Fingerprinting:**
+Pastaay utilizes an FNV-1a hashing algorithm to generate a `PolicyHash`. Even during a `hot-reload`, the engine uses this hash to ensure running streams maintain their original "Chaos Fate" consistently, preventing active streams from flickering between stable and chaotic states.
 ### 5. Redis Chaos (`type: "redis"`)
 * **Target Format:** Specific command (e.g., `"get"`, `"set"`), or `"all"`.
 * **Fault Behavior:** Simulates a **Cache Miss** by returning a `redis.Nil` error. Respects pipeline sequence (latency strictly applied *before* physical execution).
@@ -176,3 +179,6 @@ Pastaay is hardened against the "Linux File-Save Amnesia" bug. Standard editors 
 * **Recovery**: Pastaay natively traps Rename/Remove events.
 
 * **Re-attachment**: It engages an asynchronous retry loop to re-attach the fsnotify watcher to the new file inode instantly, ensuring zero configuration downtime.
+
+---
+y uses a `BatchSpanProcessor. Spans are flushed asynchronously and will never block your application's critical path, even if the collector goes offline.*

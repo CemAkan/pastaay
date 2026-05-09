@@ -43,7 +43,7 @@ graph LR
         H["<b>OS Resources (CPU/RAM)</b>"]
     end
 
-    subgraph PE ["PASTAAY ENGINE (v1.7)"]
+    subgraph PE ["PASTAAY ENGINE (v1.8)"]
         direction TB
 
         subgraph IL ["1. INTERCEPTOR LAYER (ZERO-ALLOCATION)"]
@@ -59,15 +59,22 @@ graph LR
             I5["<b>Resource Sabotage Trigger</b><br/>Intensity & Threshold Control"]
         end
 
-        subgraph CE ["2. CORE EVALUATOR"]
+        subgraph CE ["2. CORE EVALUATOR & TRACING"]
             direction TB
             E1{"O(1) Policy Lookup"}
             subgraph CE_RES ["Resource Sabotage Units"]
-                E4["<b>CPU Burner</b><br/>Lock-Free PCG Control"]
-                E5["<b>RAM Leaker</b><br/>Page-Forcing Vector"]
+                E4["<b>CPU Burner</b><br/>Lock-Free PCG"]
+                E5["<b>RAM Leaker</b><br/>Page-Forcing"]
             end
             E2["Lock-Free RNG"]
             E3["Context Delayer"]
+
+            T1(("<b>OpenTelemetry</b><br/>Batch Processor"))
+
+            E1 <--> E2
+            E1 --> E3
+            E1 -.->|StartSpan| T1
+            E3 -.->|EndSpan| T1
         end
 
         subgraph MC ["3. MEMORY & CONFIGURATION"]
@@ -83,7 +90,13 @@ graph LR
         F2["Amnesia-Proof Watcher"]
     end
 
-%% -- CLEAN VERTICAL CONNECTIONS --
+    subgraph OBS ["EXTERNAL OBSERVABILITY"]
+        direction TB
+        O1["Prometheus (Metrics)"]
+        O2["Jaeger/Zipkin (Traces)"]
+    end
+
+%%   VERTICAL CONNECTIONS 
     A -.-> I1
     B -.-> I2
     C -.-> I3
@@ -93,8 +106,6 @@ graph LR
     I5 ==>|Intensity| E4
     I5 ==>|Chunk/Interval| E5
 
-    E1 <--> E2
-    E1 --> E3
     E1 ==>|Reads| M1
 
     E4 & E5 -.->|Sabotage| H
@@ -103,16 +114,21 @@ graph LR
     F2 --> M2
     M2 ==>|Updates| M1
 
+    T1 ===>|gRPC / OTLP| O2
+    CE ===>|Metrics| O1
+
 %% Styling
     classDef interceptor fill:#f9f5d7,stroke:#b57614,stroke-width:2px,color:#3c3836;
     classDef evaluator fill:#d3e8e1,stroke:#076678,stroke-width:2px,color:#3c3836;
     classDef memory fill:#e2d3e8,stroke:#8f3f71,stroke-width:2px,color:#3c3836;
     classDef filesystem fill:#d5e8d3,stroke:#427b58,stroke-width:2px,color:#3c3836;
+    classDef observability fill:#f2e5bc,stroke:#d65d0e,stroke-width:2px,color:#3c3836;
 
     class I1,I2,I3,I4,I5 interceptor;
-    class E1,E2,E3,E4,E5 evaluator;
+    class E1,E2,E3,E4,E5,T1 evaluator;
     class M1,M2 memory;
     class F1,F2 filesystem;
+    class O1,O2 observability;
 ```
 
 ---
@@ -163,8 +179,34 @@ To ensure high-fidelity Grafana dashboards, Pastaay v1.6.2 enforces a **Standard
 *   **Format:** `protocol:target` (e.g., `sql:all`, `kafka:orders.events`, `grpc:/Service/Method`).
 *   **Unified Tracking:** All faults (latency, drop, error) now use these consistent tags across all 7 supported protocols, eliminating data fragmentation in multi-protocol environments.ected, Pastaay increments the counter using atomic memory operations (`sync/atomic.AddUint64`), which execute at the hardware level in sub-nanoseconds. This means observability is entirely non-blocking and lock-free.
 
-## 5. OS-Level Resource Sabotage (v1.7)
+## 5. OS-Level Resource Sabotage 
 Low-level resource exhaustion that bypasses standard OS and Compiler optimizations:
 * **Demand Paging Evasion:** Standard allocations are lazy. Pastaay forces physical RAM allocation by writing to every 4KB page boundary, bypassing kernel-level optimizations.
 * **Amnesia Protocol:** To ensure zero-footprint, resource goroutines use local pools. Upon context cancellation, pointers are nulled and `runtime.GC()` is invoked for immediate reclamation.
 * **Lock-Free CPU Stress:** Uses a tight loop with a configurable `throttle_threshold` for consistent stress without context-switching overhead.
+
+## 6. Distributed Tracing Pipeline
+
+Pastaay provides native, zero-allocation tracing via OpenTelemetry to map chaos events directly into your microservices' distributed traces.
+
+### Asynchronous Telemetry
+To ensure the chaos engine never becomes a performance bottleneck, Pastaay implements the `BatchSpanProcessor`. Span data is buffered and exported asynchronously via gRPC to the OpenTelemetry Collector. If the collector becomes unreachable, the spans are dropped from the buffer silently, ensuring the host application never experiences trace-induced memory leaks or CPU blocking.
+
+### Appendix: OpenTelemetry Span Reference
+Pastaay generates specific span names based on the protocol and the type of fault injected. You can search for these exact span names in your tracing UI (Jaeger/Zipkin):
+
+**HTTP & gRPC:**
+* `pastaay.http.latency` / `pastaay.http.error`
+* `pastaay.grpc.latency` / `pastaay.grpc.error`
+
+**Databases & Caches:**
+* `pastaay.sql.latency` / `pastaay.sql.error`
+* `pastaay.mongo.latency` / `pastaay.mongo.error`
+* `pastaay.redis.latency` / `pastaay.redis.error`
+* `pastaay.redis.pipeline_latency` / `pastaay.redis.pipeline_error` *(Pipeline batches)*
+
+**Message Brokers:**
+* `pastaay.kafka.latency` / `pastaay.kafka.error`
+* `pastaay.kafka.drop` *(Silent message omission)*
+* `pastaay.rabbitmq.latency` / `pastaay.rabbitmq.error`
+* `pastaay.rabbitmq.drop` *(Silent message omission)*
