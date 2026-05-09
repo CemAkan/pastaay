@@ -18,6 +18,7 @@ services:
       - MONGO_URI=mongodb://mongo:27017
       - KAFKA_ADDR=redpanda:9092
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
     volumes:
       - ./:/root/config/
     depends_on:
@@ -26,6 +27,7 @@ services:
       - mongo
       - redpanda
       - rabbitmq
+      - otel-collector
 
   mongo:
     image: mongo:6.0
@@ -64,3 +66,19 @@ services:
       - --advertise-kafka-addr PLAINTEXT://redpanda:9092
     ports:
       - "9092:9092"
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.96.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686" # Jaeger Web UI
+      - "4317"        # OTLP gRPC

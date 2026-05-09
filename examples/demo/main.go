@@ -4,9 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -18,13 +22,13 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/CemAkan/pastaay/pkg/brokerchaos"
-	"github.com/CemAkan/pastaay/pkg/chaos"
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
 	"github.com/CemAkan/pastaay/pkg/mongochaos"
 	"github.com/CemAkan/pastaay/pkg/redischaos"
 	"github.com/CemAkan/pastaay/pkg/ritual"
 	"github.com/CemAkan/pastaay/pkg/sqlchaos"
+	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
 type brokerAdapter struct {
@@ -41,237 +45,300 @@ func (b *brokerAdapter) IsCommandIgnored(protocol string, cmd string) bool {
 }
 
 func main() {
-	log.Println("[INFO] PASTAAY DEMO STARTING")
+	log.Println("[INFO] PASTAAY ENGINE BOOTING...")
 
-	// FIX: Docker-Compose'dan okuyabilmek için env kontrolü eklendi
+	mainCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// 1. Trace Provider Lifecycle
+	shutdownOTel, err := tracing.InitProvider(mainCtx, getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
+	if err != nil {
+		log.Printf("[ERROR] OpenTelemetry initialization failure: %v", err)
+		return
+	}
+
+	defer func() {
+		log.Println("[INFO] Finalizing OpenTelemetry: Flushing spans...")
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownOTel(flushCtx)
+	}()
+
+	// 2. Configuration & Hot-Reload Watcher
 	cfgPath := getEnv("CONFIG_PATH", "pastaay.yaml")
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
-		log.Fatalf("[FATAL] CONFIG LOAD ERROR: %v", err)
+		log.Printf("[ERROR] Core configuration load failure: %v", err)
+		return
 	}
-
 	cfgManager := config.NewManager(cfg)
-	config.WatchConfig(cfgPath, cfgManager.Update)
+	_ = config.WatchConfig(cfgPath, cfgManager.Update)
 
 	go metrics.StartServer(":2112")
 
-	// Redis Setup
+	// 3. Infrastructure Datastores
+	rdb, db, mClient := initDatastores(cfgManager)
+	defer rdb.Close()
+	defer db.Close()
+	if mClient != nil {
+		defer func() {
+			disCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = mClient.Disconnect(disCtx)
+		}()
+	}
+
+	// 4. Broker Lifecycles
+	go initKafka(mainCtx, cfgManager)
+	go initRabbitMQ(mainCtx, cfgManager)
+
+	// 5. Hardened Server Setup
+	mux := setupRouter(cfgManager, rdb, db, mClient)
+	chaosHandler := ritual.Middleware(cfgManager)(mux)
+
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      chaosHandler,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
+	go startBackgroundPinger(mainCtx)
+
+	// 6. Graceful Shutdown Orchestration
+	done := make(chan struct{})
+	go func() {
+		<-mainCtx.Done()
+		log.Println("[WARN] Shutdown signal captured. Draining resources...")
+		shutdownCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutCancel()
+		_ = srv.Shutdown(shutdownCtx)
+		close(done)
+	}()
+
+	log.Println("[INFO] Pastaay Demo is LIVE on :8080")
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("[FATAL] Server crash: %v", err)
+	}
+
+	<-done
+	log.Println("[INFO] Pastaay successfully decommissioned.")
+}
+
+func initDatastores(mgr *config.Manager) (*redis.Client, *sql.DB, *mongo.Client) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:   getEnv("REDIS_ADDR", "redis:6379"),
-		Dialer: redischaos.NewChaosDialer(cfgManager, nil),
+		Dialer: redischaos.NewChaosDialer(mgr, nil),
 	})
-	rdb.AddHook(redischaos.NewChaosHook(cfgManager))
+	rdb.AddHook(redischaos.NewChaosHook(mgr))
 
-	// SQL Setup
-	sqlchaos.Register("pastaay-postgres", &pq.Driver{}, cfgManager)
+	sqlchaos.Register("pastaay-postgres", &pq.Driver{}, mgr)
 	db, _ := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@db:5432/shortener?sslmode=disable"))
 
-	// Mongo Setup
 	mOpts := options.Client().ApplyURI(getEnv("MONGO_URI", "mongodb://mongo:27017"))
-	mongochaos.ApplyChaos(mOpts, cfgManager)
-	mClient, _ := mongo.Connect(mOpts)
+	mongochaos.ApplyChaos(mOpts, mgr)
+	mClient, err := mongo.Connect(mOpts)
+	if err != nil {
+		log.Printf("[ERROR] MongoDB failure: %v", err)
+	}
 
-	kafkaEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "kafka"})
-	rabbitEval := brokerchaos.NewEvaluator(&brokerAdapter{mgr: cfgManager, protocol: "rabbitmq"})
+	return rdb, db, mClient
+}
 
-	// Kafka Setup
+func initKafka(ctx context.Context, mgr *config.Manager) {
+	kafkaAddr := getEnv("KAFKA_ADDR", "redpanda:9092")
+	saramaCfg := sarama.NewConfig()
+	saramaCfg.Producer.Return.Successes = true
+
+	var kc sarama.Client
+	var err error
+	for i := 0; i < 10; i++ {
+		kc, err = sarama.NewClient([]string{kafkaAddr}, saramaCfg)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if err != nil {
+		return
+	}
+	defer kc.Close()
+
+	prod, err := sarama.NewSyncProducerFromClient(kc)
+	if err != nil {
+		return
+	}
+	defer prod.Close()
+
+	childCtx, childCancel := context.WithCancel(ctx)
+	defer childCancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		kafkaAddr := getEnv("KAFKA_ADDR", "redpanda:9092")
-
-		saramaCfg := sarama.NewConfig()
-		saramaCfg.Producer.Return.Successes = true
-
-		var kc sarama.Client
-		var kcErr error
-		for i := 0; i < 15; i++ {
-			kc, kcErr = sarama.NewClient([]string{kafkaAddr}, saramaCfg)
-			if kcErr == nil {
-				break
-			}
-			log.Printf("[WAIT] Waiting for Kafka... (%d/15)", i+1)
-			time.Sleep(2 * time.Second)
-		}
-		if kcErr != nil {
-			log.Printf("[ERROR] Kafka unavailable, skipping: %v", kcErr)
-			return
-		}
-
-		prod, err := sarama.NewSyncProducerFromClient(kc)
-		if err != nil {
-			log.Printf("[ERROR] Kafka producer error: %v", err)
-			return
-		}
-
-		go func() {
-			for {
-				_, _, err := prod.SendMessage(&sarama.ProducerMessage{Topic: "events.stream", Value: sarama.StringEncoder("payload")})
-				if err != nil {
-					log.Printf("[ERROR] Producer send failed: %v", err)
-				}
-				time.Sleep(2 * time.Second)
-			}
-		}()
-		time.Sleep(3 * time.Second) // Wait for topic creation
-
-		cons, err := sarama.NewConsumerFromClient(kc)
-		if err != nil {
-			log.Printf("[ERROR] Kafka consumer error: %v", err)
-			return
-		}
-
-		pc, err := cons.ConsumePartition("events.stream", 0, sarama.OffsetNewest)
-		if err != nil {
-			log.Printf("[ERROR] Kafka partition error: %v", err)
-			return
-		}
-
-		mid := brokerchaos.NewKafkaConsumerMiddleware(kafkaEval)
-
-		for m := range pc.Messages() {
-			drp, _ := mid.Intercept(context.Background(), m)
-			if drp {
-				log.Printf("[CHAOS] [KAFKA] Event Dropped")
-			} else {
-				log.Printf("[OK] [KAFKA] Processed Cleanly")
+		defer wg.Done()
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-childCtx.Done():
+				return
+			case <-ticker.C:
+				_, _, _ = prod.SendMessage(&sarama.ProducerMessage{
+					Topic: "events.stream",
+					Value: sarama.StringEncoder("payload"),
+				})
 			}
 		}
 	}()
 
-	// RabbitMQ Setup
-	go func() {
-		rabbitURL := getEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
-		var conn *amqp.Connection
-		var amqpErr error
-		for i := 0; i < 15; i++ {
-			conn, amqpErr = amqp.Dial(rabbitURL)
-			if amqpErr == nil {
-				break
+	cons, err := sarama.NewConsumerFromClient(kc)
+	if err != nil {
+		return
+	}
+	defer cons.Close()
+
+	pc, err := cons.ConsumePartition("events.stream", 0, sarama.OffsetNewest)
+	if err != nil {
+		return
+	}
+	defer pc.Close()
+
+	evaluator := brokerchaos.NewEvaluator(&brokerAdapter{mgr: mgr, protocol: "kafka"})
+	middleware := brokerchaos.NewKafkaConsumerMiddleware(evaluator)
+
+	for {
+		select {
+		case <-ctx.Done():
+			childCancel()
+			wg.Wait()
+			return
+		case m, ok := <-pc.Messages():
+			if !ok {
+				childCancel()
+				wg.Wait()
+				return
 			}
-			log.Printf("[WAIT] Waiting for RabbitMQ... (%d/15)", i+1)
-			time.Sleep(2 * time.Second)
-		}
-		if amqpErr != nil {
-			log.Printf("[ERROR] RabbitMQ unavailable, skipping: %v", amqpErr)
-			return
-		}
-
-		ch, err := conn.Channel()
-		if err != nil {
-			log.Printf("[ERROR] RabbitMQ channel error: %v", err)
-			return
-		}
-
-		q, err := ch.QueueDeclare("chaos.queue", false, false, false, false, nil)
-		if err != nil {
-			log.Printf("[ERROR] RabbitMQ queue error: %v", err)
-			return
-		}
-
-		msgs, err := ch.Consume(q.Name, "", true, false, false, false, nil)
-		if err != nil {
-			log.Printf("[ERROR] RabbitMQ consume error: %v", err)
-			return
-		}
-
-		mid := brokerchaos.NewRabbitMQMiddleware(rabbitEval)
-
-		go func() {
-			for {
-				err := ch.PublishWithContext(context.Background(), "", q.Name, false, false, amqp.Publishing{Body: []byte("payload")})
-				if err != nil {
-					log.Printf("[ERROR] RabbitMQ publish failed: %v", err)
-				}
-				time.Sleep(2 * time.Second)
-			}
-		}()
-
-		for d := range msgs {
-			drp, _ := mid.Intercept(context.Background(), &d)
+			drp, _ := middleware.Intercept(ctx, m)
 			if drp {
-				log.Printf("[CHAOS] [RABBITMQ] Event Dropped")
-			} else {
-				log.Printf("[OK] [RABBITMQ] Processed Cleanly")
+				log.Printf("[CHAOS] [KAFKA] Message dropped")
+			}
+		}
+	}
+}
+
+func initRabbitMQ(ctx context.Context, mgr *config.Manager) {
+	rabbitURL := getEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+	var conn *amqp.Connection
+	var err error
+	for i := 0; i < 10; i++ {
+		conn, err = amqp.Dial(rabbitURL)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
+		return
+	}
+	defer ch.Close()
+
+	q, _ := ch.QueueDeclare("chaos.queue", false, false, false, false, nil)
+	msgs, err := ch.Consume(q.Name, "", true, false, false, false, nil)
+	if err != nil {
+		return
+	}
+
+	evaluator := brokerchaos.NewEvaluator(&brokerAdapter{mgr: mgr, protocol: "rabbitmq"})
+	middleware := brokerchaos.NewRabbitMQMiddleware(evaluator)
+
+	childCtx, childCancel := context.WithCancel(ctx)
+	defer childCancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-childCtx.Done():
+				return
+			case <-ticker.C:
+				_ = ch.PublishWithContext(ctx, "", q.Name, false, false, amqp.Publishing{Body: []byte("payload")})
 			}
 		}
 	}()
 
-	// HTTP API
+	for {
+		select {
+		case <-ctx.Done():
+			childCancel()
+			wg.Wait()
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				childCancel()
+				wg.Wait()
+				return
+			}
+			drp, _ := middleware.Intercept(ctx, &d)
+			if drp {
+				log.Printf("[CHAOS] [RABBITMQ] Message dropped")
+			}
+		}
+	}
+}
+
+func setupRouter(mgr *config.Manager, rdb *redis.Client, db *sql.DB, mClient *mongo.Client) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {
-		if err := mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}}).Err(); err != nil {
-			log.Printf("[CHAOS] [MONGO] Connection/Command failed: %v", err)
-		} else {
-			log.Printf("[OK] [MONGO] Ping successful")
+		if mClient != nil {
+			_ = mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}})
 		}
+		_ = rdb.Ping(r.Context())
+		_ = db.PingContext(r.Context())
 
-		if err := rdb.Ping(r.Context()).Err(); err != nil {
-			log.Printf("[CHAOS] [REDIS] Cache Miss or Error: %v", err)
-		} else {
-			log.Printf("[OK] [REDIS] Ping successful")
-		}
-
-		if err := db.PingContext(r.Context()); err != nil {
-			log.Printf("[CHAOS] [SQL] Query failed: %v", err)
-		} else {
-			log.Printf("[OK] [SQL] Ping successful")
-		}
-
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "PONG"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "PONG"})
 	})
+	return mux
+}
 
-	// Resource Sabotage Endpoint
-	mux.HandleFunc("/sabotage/resources", func(w http.ResponseWriter, r *http.Request) {
-		policies := cfgManager.GetActivePolicies("resource")
-		if len(policies) == 0 {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"status": "ignored", "reason": "no resource policy found in yaml"}`))
+func startBackgroundPinger(ctx context.Context) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	client := &http.Client{Timeout: 2 * time.Second}
+	for {
+		select {
+		case <-ctx.Done():
 			return
-		}
-
-		p := policies[0]
-		policy := chaos.ResourcePolicy{}
-
-		// CPU
-		policy.CPU.Enabled = true
-		policy.CPU.Cores = 0
-		policy.CPU.Duration = p.LatencyDuration
-		policy.CPU.ThrottleThreshold = p.ThrottleThreshold
-
-		// RAM
-		policy.RAM.Enabled = true
-		policy.RAM.ChunkMB = p.RAMChunkMB
-		policy.RAM.Interval = p.RAMInterval
-		policy.RAM.Duration = p.LatencyDuration
-
-		chaos.TriggerResourceSabotage(policy)
-
-		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":   "chaos_injected",
-			"policy":   p.Name,
-			"target":   p.Target,
-			"duration": p.LatencyDuration.String(),
-		})
-	})
-
-	go func() {
-		time.Sleep(5 * time.Second)
-		client := &http.Client{Timeout: 2 * time.Second}
-		for {
-			resp, err := client.Get("http://localhost:8080/api/v1/ping")
+		case <-ticker.C:
+			req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost:8080/api/v1/ping", nil)
 			if err != nil {
-				log.Printf("[CHAOS] [HTTP] API Request failed: %v", err)
-			} else {
-				log.Printf("[OK] [HTTP] API Status: %d", resp.StatusCode)
-				resp.Body.Close()
+				continue
 			}
-			time.Sleep(3 * time.Second)
+			if resp, err := client.Do(req); err == nil {
+				_ = resp.Body.Close()
+			}
 		}
-	}()
-
-	log.Println("[INFO] Pastaay Integration Demo is LIVE on :8080")
-	log.Fatal(http.ListenAndServe(":8080", ritual.Middleware(cfgManager)(mux)))
+	}
 }
 
 func getEnv(k, f string) string {
