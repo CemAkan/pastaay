@@ -181,4 +181,3 @@ Pastaay is hardened against the "Linux File-Save Amnesia" bug. Standard editors 
 * **Re-attachment**: It engages an asynchronous retry loop to re-attach the fsnotify watcher to the new file inode instantly, ensuring zero configuration downtime.
 
 ---
-y uses a `BatchSpanProcessor. Spans are flushed asynchronously and will never block your application's critical path, even if the collector goes offline.*

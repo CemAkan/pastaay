@@ -180,14 +180,16 @@ docker compose run --rm --service-ports app
 
 ---
 
-## Roadmap:
+## Roadmap
 
 Pastaay is rapidly evolving into a full-fledged enterprise chaos engineering suite. Here is our aggressive roadmap for the upcoming major releases:
 
-| Version | Planned Features | Status   |
-| :--- | :--- |:---------|
-| **v1.9** | **Cloud & Low-Level:** AWS Fault Injection Simulator (FIS) hooking and eBPF-based packet dropping without code changes. | In Progress |
-| **v2.0** | **The Enterprise Suite:** Kubernetes Operator (`pastaay-operator` via CRDs), CLI Tool (`pastaay-cli`), and a real-time Web Dashboard UI. | Planned  |
+| Version | Theme | Planned Features | Status |
+| :--- | :--- | :--- | :--- |
+| **v1.9** | **The Cloud-Native Bridge** | **Remote Control Sensors:** Bypassing static YAML with dynamic triggers. K8s ConfigMap Watchers, Redis PubSub listeners, and AWS FIS webhook integrations. | In Progress |
+| **v2.0** | **The Enterprise Suite** | **Centralized Ecosystem:** Kubernetes Operator (`pastaay-operator` via CRDs), Central Web UI Dashboard, and the **`pastaayctl`** CLI tool. *(Launching `pastaay-ebpf` as a separate L4 sidecar project)*. | Planned  |
+| **v2.1** | **GitOps & CI/CD** | **Automated Chaos:** Native GitHub Actions and GitLab CI integrations for Chaos-as-Code. Automated rollbacks when safety thresholds are breached during staging pipelines. | Planned  |
+| **v2.2** | **Smart Blast Radius** | **Autopilot Mode:** ML-driven blast radius adjustment. The engine learns your baseline traffic and dynamically adjusts fault intensity without manual configuration. | Planned  |
 
 <br>
 
