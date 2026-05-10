@@ -50,7 +50,7 @@ func main() {
 	mainCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Trace Provider Lifecycle
+	// Trace Provider Lifecycle
 	shutdownOTel, err := tracing.InitProvider(mainCtx, getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
 	if err != nil {
 		log.Printf("[ERROR] OpenTelemetry initialization failure: %v", err)
@@ -64,7 +64,7 @@ func main() {
 		_ = shutdownOTel(flushCtx)
 	}()
 
-	// 2. Configuration & Hot-Reload Watcher
+	// Configuration & Hot-Reload Watcher
 	cfgPath := getEnv("CONFIG_PATH", "pastaay.yaml")
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
@@ -74,9 +74,19 @@ func main() {
 	cfgManager := config.NewManager(cfg)
 	_ = config.WatchConfig(cfgPath, cfgManager.Update)
 
-	go metrics.StartServer(":2112")
+	// Admin Server (Metrics & Webhook)
+	adminMux := http.NewServeMux()
+	adminMux.Handle("/metrics", metrics.GetHandler())
+	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(cfgManager.Update))
 
-	// 3. Infrastructure Datastores
+	go func() {
+		log.Println("[INFO] Pastaay Admin Server listening on :2112")
+		if err := http.ListenAndServe(":2112", adminMux); err != nil {
+			log.Printf("[ERROR] Admin server failed: %v", err)
+		}
+	}()
+
+	// Infrastructure Datastores
 	rdb, db, mClient := initDatastores(cfgManager)
 	defer rdb.Close()
 	defer db.Close()
@@ -88,11 +98,19 @@ func main() {
 		}()
 	}
 
-	// 4. Broker Lifecycles
+	// Remote Control Sensors
+	redisChannel := getEnv("REDIS_CONFIG_CHANNEL", "pastaay:chaos:policies")
+	if err := config.WatchRedisPubSub(mainCtx, rdb, redisChannel, cfgManager.Update); err != nil {
+		log.Printf("[WARN] Failed to attach Redis PubSub sensor: %v", err)
+	} else {
+		log.Printf("[INFO] Remote Control Active: Listening on Redis channel '%s'", redisChannel)
+	}
+
+	// Broker Lifecycles
 	go initKafka(mainCtx, cfgManager)
 	go initRabbitMQ(mainCtx, cfgManager)
 
-	// 5. Hardened Server Setup
+	// Hardened Server Setup
 	mux := setupRouter(cfgManager, rdb, db, mClient)
 	chaosHandler := ritual.Middleware(cfgManager)(mux)
 
@@ -105,7 +123,7 @@ func main() {
 
 	go startBackgroundPinger(mainCtx)
 
-	// 6. Graceful Shutdown Orchestration
+	// Graceful Shutdown Orchestration
 	done := make(chan struct{})
 	go func() {
 		<-mainCtx.Done()
