@@ -28,22 +28,23 @@ type k8sConfigMap struct {
 	Data map[string]string `json:"data"`
 }
 
-// WatchK8sConfigMap polls a Kubernetes ConfigMap natively with aggressive network timeouts
-// to prevent goroutine leaks during context cancellation.
-func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.Duration, reloadCallback func(*PastaayConfig)) error {
+// WatchK8sConfigMap polls K8s API and reports health status to the Manager.
+func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.Duration, mgr *Manager) error {
 	token, err := os.ReadFile(k8sTokenPath)
 	if err != nil {
+		mgr.SetSensorStatus("k8s", "token_missing")
 		return fmt.Errorf("k8s token missing: %w", err)
 	}
 
 	ns, err := os.ReadFile(k8sNamespacePath)
 	if err != nil {
+		mgr.SetSensorStatus("k8s", "ns_missing")
 		return fmt.Errorf("k8s namespace missing: %w", err)
 	}
 
 	url := fmt.Sprintf("https://%s/api/v1/namespaces/%s/configmaps/%s", k8sHost, string(ns), cmName)
+	mgr.SetSensorStatus("k8s", "initializing")
 
-	// Prevents the watcher from becoming a zombie goroutine
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		DialContext: (&net.Dialer{
@@ -52,13 +53,9 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 		}).DialContext,
 		ResponseHeaderTimeout: 5 * time.Second,
 		IdleConnTimeout:       60 * time.Second,
-		MaxIdleConns:          10,
 	}
 
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   15 * time.Second,
-	}
+	client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
 
 	go func() {
 		var lastVersion string
@@ -78,14 +75,15 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 
 				resp, err := client.Do(req)
 				if err != nil {
+					mgr.SetSensorStatus("k8s", "api_error")
 					continue
 				}
 
 				var cm k8sConfigMap
-				// Use LimitReader to prevent massive response payloads
 				err = json.NewDecoder(io.LimitReader(resp.Body, 5<<20)).Decode(&cm)
 				resp.Body.Close()
 				if err != nil {
+					mgr.SetSensorStatus("k8s", "decode_error")
 					continue
 				}
 
@@ -94,17 +92,18 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 					if payload, exists := cm.Data[cmKey]; exists {
 						var newCfg PastaayConfig
 						if err := yaml.Unmarshal([]byte(payload), &newCfg); err != nil {
-							log.Printf("[Pastaay-K8s] Invalid structure in CM %q: %v", cmName, err)
+							mgr.SetSensorStatus("k8s", "yaml_error")
 							continue
 						}
 
 						if err := newCfg.Validate(); err != nil {
-							log.Printf("[Pastaay-K8s] Validation failed for CM %q: %v", cmName, err)
+							mgr.SetSensorStatus("k8s", "invalid_config")
 							continue
 						}
 
-						reloadCallback(&newCfg)
-						log.Printf("[Pastaay-K8s] Engine updated via ConfigMap %q (v:%s)", cmName, lastVersion)
+						mgr.Update(&newCfg)
+						mgr.SetSensorStatus("k8s", "healthy")
+						log.Printf("[Pastaay-K8s] Engine memory hot-swapped (v:%s)", lastVersion)
 					}
 				}
 			}

@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"sync"
 	"time"
 
@@ -16,14 +15,14 @@ type RedisAck struct {
 	Message string `json:"message"`
 }
 
-// WatchRedisPubSub subscribes to a chaos channel and ensures distributed feedback via non-blocking ACKs.
-// It accepts an optional WaitGroup to ensure all telemetry is dispatched before shutdown.
-func WatchRedisPubSub(ctx context.Context, client *redis.Client, channel string, wg *sync.WaitGroup, reloadCallback func(*PastaayConfig)) error {
+func WatchRedisPubSub(ctx context.Context, client *redis.Client, channel string, wg *sync.WaitGroup, mgr *Manager) error {
 	pubsub := client.Subscribe(ctx, channel)
 	if _, err := pubsub.Receive(ctx); err != nil {
+		mgr.SetSensorStatus("redis", "error")
 		return err
 	}
 
+	mgr.SetSensorStatus("redis", "connected")
 	ackChannel := channel + ":ack"
 	ch := pubsub.Channel()
 
@@ -45,18 +44,17 @@ func WatchRedisPubSub(ctx context.Context, client *redis.Client, channel string,
 				}
 
 				if err := newCfg.Validate(); err != nil {
-					log.Printf("[Pastaay-Remote] Policy rejected: %v", err)
+					mgr.SetSensorStatus("redis", "rejected_payload")
 					sendAck(ctx, client, ackChannel, wg, "rejected", err.Error())
 					continue
 				}
 
-				reloadCallback(&newCfg)
-				log.Printf("[Pastaay-Remote] Engine memory hot-swapped via Redis")
-				sendAck(ctx, client, ackChannel, wg, "success", "Policies applied")
+				mgr.Update(&newCfg)
+				mgr.SetSensorStatus("redis", "healthy")
+				sendAck(ctx, client, ackChannel, wg, "success", "Applied")
 			}
 		}
 	}()
-
 	return nil
 }
 
@@ -68,12 +66,8 @@ func sendAck(ctx context.Context, client *redis.Client, channel string, wg *sync
 		if wg != nil {
 			defer wg.Done()
 		}
-
-		// Use background context for ACKs to ensure dispatch even if parent ctx is closing,
-		// but with a very tight local timeout.
 		ackCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-
 		ack := RedisAck{Status: status, Message: message}
 		if payload, err := json.Marshal(ack); err == nil {
 			client.Publish(ackCtx, channel, payload)
