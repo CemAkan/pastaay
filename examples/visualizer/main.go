@@ -27,7 +27,7 @@ const (
 	C_Stable        = "\x1b[38;5;82m"
 	C_Yellow        = "\x1b[38;5;226m"
 	C_Gray          = "\x1b[90m"
-	C_Startup       = "\033c\x1b[?25l" // Hard reset + Hide cursor
+	C_Startup       = "\033c\x1b[?25l"
 	JitterThreshold = 40 * time.Millisecond
 	RenderFPS       = 20 * time.Millisecond
 )
@@ -42,11 +42,8 @@ const logo = `
 
 var parsedLogo []string
 
-func init() {
-	parsedLogo = strings.Split(strings.Trim(logo, "\n"), "\n")
-}
+func init() { parsedLogo = strings.Split(strings.Trim(logo, "\n"), "\n") }
 
-// ProbeState Decouples the UI rendering from the actual chaos evaluation (Prevents Frame Freeze)
 type ProbeState struct {
 	mu         sync.RWMutex
 	ProbeStart time.Time
@@ -69,71 +66,50 @@ func main() {
 		s.Serve(lis)
 	}()
 
-	ctx := context.Background()
 	state := &ProbeState{}
-
-	// Independent Probe Worker (Prevents Frame Freezing, allows live jitter tracking)
 	go func() {
 		for {
 			state.mu.Lock()
-			state.IsActive = true
-			state.ProbeStart = time.Now()
+			state.IsActive, state.ProbeStart = true, time.Now()
 			state.mu.Unlock()
 
-			err := simulateNeuralDrift(ctx, mgr)
+			err := simulateNeuralDrift(context.Background(), mgr)
 			elapsed := time.Since(state.ProbeStart)
 
 			state.mu.Lock()
-			state.IsActive = false
-			state.LastJitter = elapsed
-			state.IsVoid = (err != nil)
+			state.IsActive, state.LastJitter, state.IsVoid = false, elapsed, (err != nil)
 			state.mu.Unlock()
-
-			time.Sleep(50 * time.Millisecond) // Probe cooldown
+			time.Sleep(50 * time.Millisecond)
 		}
 	}()
 
 	frame := 0.0
-
 	for {
 		var screen strings.Builder
-		screen.WriteString("\x1b[H")
-		screen.WriteString("\x1b[K\n\x1b[K\n")
+		screen.WriteString("\x1b[H\x1b[K\n\x1b[K\n")
 
-		// Safely extract the decoupled state
 		state.mu.RLock()
-		isVoid := state.IsVoid
-		var elapsed time.Duration
-		if state.IsActive {
-			elapsed = time.Since(state.ProbeStart) // Live jitter tracking during active sleep
-		} else {
-			elapsed = state.LastJitter
+		isVoid, active := state.IsVoid, state.IsActive
+		elapsed := state.LastJitter
+		if active {
+			elapsed = time.Since(state.ProbeStart)
 		}
 		state.mu.RUnlock()
 
 		isGlitch := elapsed > JitterThreshold
-
-		// 1. RENDER LOGO
 		renderProLogo(&screen, isVoid, isGlitch)
-
 		screen.WriteString(C_Gray + " ━" + strings.Repeat("━", 60) + C_Reset + "\x1b[K\n")
-
-		// 2. VORTEX AREA
 		drawVortexField(&screen, frame, isVoid, isGlitch)
-
 		screen.WriteString(C_Gray + " ━" + strings.Repeat("━", 60) + C_Reset + "\x1b[K\n")
-
-		// 3. STATUS AREA
 		renderProStatus(&screen, isVoid, isGlitch, elapsed, int(frame))
 
 		fmt.Print(screen.String())
-
 		if isGlitch {
 			frame += 0.05
 		} else {
 			frame += 0.25
 		}
-		time.Sleep(RenderFPS) // UI always runs at constant FPS
+		time.Sleep(RenderFPS)
 	}
 }
 
@@ -143,7 +119,6 @@ func renderProLogo(sb *strings.Builder, isVoid, isGlitch bool) {
 		if isGlitch && rand.Float64() > 0.8 {
 			prefix = strings.Repeat(" ", rand.IntN(3))
 		}
-
 		if isVoid {
 			sb.WriteString(prefix + C_Void + corruptLine(line) + C_Reset + "\x1b[K\n")
 		} else {
@@ -153,8 +128,7 @@ func renderProLogo(sb *strings.Builder, isVoid, isGlitch bool) {
 }
 
 func drawVortexField(sb *strings.Builder, f float64, isVoid, isGlitch bool) {
-	height := 7
-	width := 60
+	height, width := 7, 60
 	for y := 0; y < height; y++ {
 		sb.WriteString("  ")
 		for x := 0; x < width; x++ {

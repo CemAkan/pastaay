@@ -52,7 +52,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// 1. Trace Provider Lifecycle (Resilient Initialization)
+	// Trace Provider Lifecycle
 	shutdownOTel, err := tracing.InitProvider(mainCtx, getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
 	if err != nil {
 		log.Printf("[WARN] OpenTelemetry initialization failed. Tracing disabled: %v", err)
@@ -65,7 +65,7 @@ func main() {
 		_ = shutdownOTel(flushCtx)
 	}()
 
-	// 2. Configuration & Hot-Reload Watcher
+	// Configuration & Hot-Reload Watcher
 	cfgPath := getEnv("CONFIG_PATH", "pastaay.yaml")
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
@@ -74,7 +74,7 @@ func main() {
 	cfgManager := config.NewManager(cfg)
 	_ = config.WatchConfig(cfgPath, cfgManager.Update)
 
-	// 3. Admin Server (Metrics & Authenticated Webhook)
+	// Admin Server
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/metrics", metrics.GetHandler())
 
@@ -91,7 +91,7 @@ func main() {
 		}
 	}()
 
-	// 4. Infrastructure Datastores (Safe Defers)
+	// Infrastructure Datastores
 	rdb, db, mClient := initDatastores(cfgManager)
 	if rdb != nil {
 		defer rdb.Close()
@@ -107,24 +107,34 @@ func main() {
 		}()
 	}
 
-	// 5. Remote Control Sensors
+	// Remote Control Sensors
 	redisChannel := getEnv("REDIS_CONFIG_CHANNEL", "pastaay:chaos:policies")
-	if err := config.WatchRedisPubSub(mainCtx, rdb, redisChannel, cfgManager.Update); err != nil {
-		log.Printf("[WARN] Failed to attach Redis PubSub sensor: %v", err)
-	} else {
-		log.Printf("[INFO] Remote Control Active: Listening on Redis channel '%s'", redisChannel)
+	if err := config.WatchRedisPubSub(mainCtx, rdb, redisChannel, &wg, cfgManager); err != nil {
+		log.Printf("[WARN] Redis PubSub sensor failed: %v", err)
 	}
 
-	k8sConfigMap := getEnv("K8S_CONFIGMAP_NAME", "")
-	if k8sConfigMap != "" {
-		if err := config.WatchK8sConfigMap(mainCtx, k8sConfigMap, "pastaay.yaml", 10*time.Second, cfgManager.Update); err != nil {
-			log.Printf("[WARN] Kubernetes sensor standby (Not in a cluster): %v", err)
-		} else {
-			log.Printf("[INFO] Remote Control Active: Polling K8s ConfigMap '%s'", k8sConfigMap)
+	// Prometheus Health Sync (10s)
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		for {
+			select {
+			case <-mainCtx.Done():
+				return
+			case <-ticker.C:
+				statuses := cfgManager.GetSensorStatuses()
+				for sensor, status := range statuses {
+					val := 0.0
+					
+					if status == "healthy" || status == "connected" || status == "initializing" {
+						val = 1.0
+					}
+					metrics.SensorStatus.WithLabelValues(sensor).Set(val)
+				}
+			}
 		}
-	}
+	}()
 
-	// 6. Broker & Background Lifecycles (Managed via WaitGroup)
+	// Broker & Background Lifecycles
 	wg.Add(3)
 	go initKafka(mainCtx, cfgManager, &wg)
 	go initRabbitMQ(mainCtx, cfgManager, &wg)
@@ -141,7 +151,7 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 	}
 
-	// 8. Graceful Shutdown Orchestration
+	// Graceful Shutdown Orchestration
 	done := make(chan struct{})
 	go func() {
 		<-mainCtx.Done()
