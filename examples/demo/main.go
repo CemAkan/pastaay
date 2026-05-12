@@ -50,13 +50,14 @@ func main() {
 	mainCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Trace Provider Lifecycle
+	var wg sync.WaitGroup
+
+	// 1. Trace Provider Lifecycle (Resilient Initialization)
 	shutdownOTel, err := tracing.InitProvider(mainCtx, getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
 	if err != nil {
-		log.Printf("[ERROR] OpenTelemetry initialization failure: %v", err)
-		return
+		log.Printf("[WARN] OpenTelemetry initialization failed. Tracing disabled: %v", err)
+		shutdownOTel = func(context.Context) error { return nil } // Fallback to No-Op
 	}
-
 	defer func() {
 		log.Println("[INFO] Finalizing OpenTelemetry: Flushing spans...")
 		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -64,32 +65,40 @@ func main() {
 		_ = shutdownOTel(flushCtx)
 	}()
 
-	// Configuration & Hot-Reload Watcher
+	// 2. Configuration & Hot-Reload Watcher
 	cfgPath := getEnv("CONFIG_PATH", "pastaay.yaml")
 	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
-		log.Printf("[ERROR] Core configuration load failure: %v", err)
-		return
+		log.Fatalf("[FATAL] Core configuration load failure: %v", err)
 	}
 	cfgManager := config.NewManager(cfg)
 	_ = config.WatchConfig(cfgPath, cfgManager.Update)
 
-	// Admin Server (Metrics & Webhook)
+	// 3. Admin Server (Metrics & Authenticated Webhook)
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/metrics", metrics.GetHandler())
-	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(cfgManager.Update))
+
+	webhookToken := getEnv("PASTAAY_WEBHOOK_TOKEN", "")
+	if webhookToken == "" {
+		log.Println("[WARN] PASTAAY_WEBHOOK_TOKEN is empty. Webhook endpoint is unprotected!")
+	}
+	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(webhookToken, cfgManager.Update))
 
 	go func() {
 		log.Println("[INFO] Pastaay Admin Server listening on :2112")
-		if err := http.ListenAndServe(":2112", adminMux); err != nil {
-			log.Printf("[ERROR] Admin server failed: %v", err)
+		if err := http.ListenAndServe(":2112", adminMux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("[FATAL] Admin server crashed: %v", err)
 		}
 	}()
 
-	// Infrastructure Datastores
+	// 4. Infrastructure Datastores (Safe Defers)
 	rdb, db, mClient := initDatastores(cfgManager)
-	defer rdb.Close()
-	defer db.Close()
+	if rdb != nil {
+		defer rdb.Close()
+	}
+	if db != nil {
+		defer db.Close()
+	}
 	if mClient != nil {
 		defer func() {
 			disCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -98,7 +107,7 @@ func main() {
 		}()
 	}
 
-	// Remote Control Sensors
+	// 5. Remote Control Sensors
 	redisChannel := getEnv("REDIS_CONFIG_CHANNEL", "pastaay:chaos:policies")
 	if err := config.WatchRedisPubSub(mainCtx, rdb, redisChannel, cfgManager.Update); err != nil {
 		log.Printf("[WARN] Failed to attach Redis PubSub sensor: %v", err)
@@ -106,11 +115,22 @@ func main() {
 		log.Printf("[INFO] Remote Control Active: Listening on Redis channel '%s'", redisChannel)
 	}
 
-	// Broker Lifecycles
-	go initKafka(mainCtx, cfgManager)
-	go initRabbitMQ(mainCtx, cfgManager)
+	k8sConfigMap := getEnv("K8S_CONFIGMAP_NAME", "")
+	if k8sConfigMap != "" {
+		if err := config.WatchK8sConfigMap(mainCtx, k8sConfigMap, "pastaay.yaml", 10*time.Second, cfgManager.Update); err != nil {
+			log.Printf("[WARN] Kubernetes sensor standby (Not in a cluster): %v", err)
+		} else {
+			log.Printf("[INFO] Remote Control Active: Polling K8s ConfigMap '%s'", k8sConfigMap)
+		}
+	}
 
-	// Hardened Server Setup
+	// 6. Broker & Background Lifecycles (Managed via WaitGroup)
+	wg.Add(3)
+	go initKafka(mainCtx, cfgManager, &wg)
+	go initRabbitMQ(mainCtx, cfgManager, &wg)
+	go startBackgroundPinger(mainCtx, &wg)
+
+	// 7. Hardened Server Setup
 	mux := setupRouter(cfgManager, rdb, db, mClient)
 	chaosHandler := ritual.Middleware(cfgManager)(mux)
 
@@ -121,16 +141,17 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 	}
 
-	go startBackgroundPinger(mainCtx)
-
-	// Graceful Shutdown Orchestration
+	// 8. Graceful Shutdown Orchestration
 	done := make(chan struct{})
 	go func() {
 		<-mainCtx.Done()
 		log.Println("[WARN] Shutdown signal captured. Draining resources...")
+
 		shutdownCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutCancel()
 		_ = srv.Shutdown(shutdownCtx)
+
+		wg.Wait() // Ensure all background workers exit cleanly
 		close(done)
 	}()
 
@@ -163,7 +184,9 @@ func initDatastores(mgr *config.Manager) (*redis.Client, *sql.DB, *mongo.Client)
 	return rdb, db, mClient
 }
 
-func initKafka(ctx context.Context, mgr *config.Manager) {
+func initKafka(ctx context.Context, mgr *config.Manager, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	kafkaAddr := getEnv("KAFKA_ADDR", "redpanda:9092")
 	saramaCfg := sarama.NewConfig()
 	saramaCfg.Producer.Return.Successes = true
@@ -182,12 +205,14 @@ func initKafka(ctx context.Context, mgr *config.Manager) {
 		}
 	}
 	if err != nil {
+		log.Printf("[ERROR] Kafka integration disabled. Connection failed: %v", err)
 		return
 	}
 	defer kc.Close()
 
 	prod, err := sarama.NewSyncProducerFromClient(kc)
 	if err != nil {
+		log.Printf("[ERROR] Kafka producer init failed: %v", err)
 		return
 	}
 	defer prod.Close()
@@ -195,10 +220,10 @@ func initKafka(ctx context.Context, mgr *config.Manager) {
 	childCtx, childCancel := context.WithCancel(ctx)
 	defer childCancel()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var workerWg sync.WaitGroup
+	workerWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer workerWg.Done()
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -233,12 +258,12 @@ func initKafka(ctx context.Context, mgr *config.Manager) {
 		select {
 		case <-ctx.Done():
 			childCancel()
-			wg.Wait()
+			workerWg.Wait()
 			return
 		case m, ok := <-pc.Messages():
 			if !ok {
 				childCancel()
-				wg.Wait()
+				workerWg.Wait()
 				return
 			}
 			drp, _ := middleware.Intercept(ctx, m)
@@ -249,7 +274,9 @@ func initKafka(ctx context.Context, mgr *config.Manager) {
 	}
 }
 
-func initRabbitMQ(ctx context.Context, mgr *config.Manager) {
+func initRabbitMQ(ctx context.Context, mgr *config.Manager, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	rabbitURL := getEnv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 	var conn *amqp.Connection
 	var err error
@@ -265,6 +292,7 @@ func initRabbitMQ(ctx context.Context, mgr *config.Manager) {
 		}
 	}
 	if err != nil {
+		log.Printf("[ERROR] RabbitMQ integration disabled. Connection failed: %v", err)
 		return
 	}
 	defer conn.Close()
@@ -287,10 +315,10 @@ func initRabbitMQ(ctx context.Context, mgr *config.Manager) {
 	childCtx, childCancel := context.WithCancel(ctx)
 	defer childCancel()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var workerWg sync.WaitGroup
+	workerWg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer workerWg.Done()
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -307,12 +335,12 @@ func initRabbitMQ(ctx context.Context, mgr *config.Manager) {
 		select {
 		case <-ctx.Done():
 			childCancel()
-			wg.Wait()
+			workerWg.Wait()
 			return
 		case d, ok := <-msgs:
 			if !ok {
 				childCancel()
-				wg.Wait()
+				workerWg.Wait()
 				return
 			}
 			drp, _ := middleware.Intercept(ctx, &d)
@@ -329,8 +357,12 @@ func setupRouter(mgr *config.Manager, rdb *redis.Client, db *sql.DB, mClient *mo
 		if mClient != nil {
 			_ = mClient.Database("admin").RunCommand(r.Context(), bson.D{{Key: "ping", Value: 1}})
 		}
-		_ = rdb.Ping(r.Context())
-		_ = db.PingContext(r.Context())
+		if rdb != nil {
+			_ = rdb.Ping(r.Context())
+		}
+		if db != nil {
+			_ = db.PingContext(r.Context())
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -339,10 +371,13 @@ func setupRouter(mgr *config.Manager, rdb *redis.Client, db *sql.DB, mClient *mo
 	return mux
 }
 
-func startBackgroundPinger(ctx context.Context) {
+func startBackgroundPinger(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	client := &http.Client{Timeout: 2 * time.Second}
+
 	for {
 		select {
 		case <-ctx.Done():
