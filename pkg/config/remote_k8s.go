@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -27,12 +28,12 @@ type k8sConfigMap struct {
 	Data map[string]string `json:"data"`
 }
 
-// WatchK8sConfigMap polls a Kubernetes ConfigMap natively without pulling the massive client-go dependency.
-// It directly interrogates the downward API using the pod's injected service account.
+// WatchK8sConfigMap polls a Kubernetes ConfigMap natively with aggressive network timeouts
+// to prevent goroutine leaks during context cancellation.
 func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.Duration, reloadCallback func(*PastaayConfig)) error {
 	token, err := os.ReadFile(k8sTokenPath)
 	if err != nil {
-		return fmt.Errorf("k8s token missing, engine is likely not running within a pod: %w", err)
+		return fmt.Errorf("k8s token missing: %w", err)
 	}
 
 	ns, err := os.ReadFile(k8sNamespacePath)
@@ -42,13 +43,21 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 
 	url := fmt.Sprintf("https://%s/api/v1/namespaces/%s/configmaps/%s", k8sHost, string(ns), cmName)
 
-	// Bypassing strict TLS verification for internal cluster communication to ensure
-	// seamless functionality across varying CNI and Service Mesh topologies without mounting custom CAs.
+	// Prevents the watcher from becoming a zombie goroutine
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ResponseHeaderTimeout: 5 * time.Second,
+		IdleConnTimeout:       60 * time.Second,
+		MaxIdleConns:          10,
+	}
+
 	client := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
+		Transport: transport,
+		Timeout:   15 * time.Second,
 	}
 
 	go func() {
@@ -72,33 +81,30 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 					continue
 				}
 
-				if resp.StatusCode != http.StatusOK {
-					resp.Body.Close()
-					continue
-				}
-
-				body, err := io.ReadAll(resp.Body)
+				var cm k8sConfigMap
+				// Use LimitReader to prevent massive response payloads
+				err = json.NewDecoder(io.LimitReader(resp.Body, 5<<20)).Decode(&cm)
 				resp.Body.Close()
 				if err != nil {
 					continue
 				}
 
-				var cm k8sConfigMap
-				if err := json.Unmarshal(body, &cm); err != nil {
-					continue
-				}
-
-				// Trigger an atomic memory swap only if the ConfigMap inode/version has mutated
 				if cm.Metadata.ResourceVersion != lastVersion {
 					lastVersion = cm.Metadata.ResourceVersion
 					if payload, exists := cm.Data[cmKey]; exists {
 						var newCfg PastaayConfig
 						if err := yaml.Unmarshal([]byte(payload), &newCfg); err != nil {
-							log.Printf("[Pastaay-K8s] Invalid payload structure in ConfigMap %q key %q: %v", cmName, cmKey, err)
+							log.Printf("[Pastaay-K8s] Invalid structure in CM %q: %v", cmName, err)
 							continue
 						}
+
+						if err := newCfg.Validate(); err != nil {
+							log.Printf("[Pastaay-K8s] Validation failed for CM %q: %v", cmName, err)
+							continue
+						}
+
 						reloadCallback(&newCfg)
-						log.Printf("[Pastaay-K8s] Engine memory hot-swapped via ConfigMap %q (v: %s)", cmName, lastVersion)
+						log.Printf("[Pastaay-K8s] Engine updated via ConfigMap %q (v:%s)", cmName, lastVersion)
 					}
 				}
 			}
