@@ -15,6 +15,7 @@ type Manager struct {
 	cfg           atomic.Pointer[PastaayConfig]
 	typedPolicies atomic.Pointer[map[string][]Policy]
 	startTime     time.Time
+	sensorStatus  sync.Map // map[string]string
 }
 
 func NewManager(initialConfig *PastaayConfig) *Manager {
@@ -23,6 +24,19 @@ func NewManager(initialConfig *PastaayConfig) *Manager {
 	m.typedPolicies.Store(&emptyMap)
 	m.Update(initialConfig)
 	return m
+}
+
+func (m *Manager) SetSensorStatus(name, status string) {
+	m.sensorStatus.Store(name, status)
+}
+
+func (m *Manager) GetSensorStatuses() map[string]string {
+	res := make(map[string]string)
+	m.sensorStatus.Range(func(k, v interface{}) bool {
+		res[k.(string)] = v.(string)
+		return true
+	})
+	return res
 }
 
 func generateStableHash(p *Policy) uint64 {
