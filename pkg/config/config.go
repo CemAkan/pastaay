@@ -1,7 +1,10 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -41,4 +44,70 @@ var DefaultProtectedCommands = map[string][]string{
 	"grpc":     {"grpc.health.v1.Health"},
 	"kafka":    {"__consumer_offsets", "_schemas", "__transaction_state"},
 	"rabbitmq": {"amq.", "reply_"},
+}
+
+var validProtocols = map[string]bool{
+	"http": true, "sql": true, "grpc": true, "redis": true,
+	"mongo": true, "kafka": true, "rabbitmq": true, "resource": true,
+}
+
+const (
+	maxLatencySafetyLimit = 60 * time.Second
+	maxRAMChunkSafetyMB   = 4096
+	maxThrottleThreshold  = 1000000
+)
+
+// Validate performs strict bounds checking and protocol-specific sanity checks.
+func (c *PastaayConfig) Validate() error {
+	var errs []error
+
+	if c.Version < 1 {
+		errs = append(errs, errors.New("global: version must be at least 1"))
+	}
+
+	for i, p := range c.Policies {
+		prefix := fmt.Sprintf("policy[%d] (%s):", i, p.Name)
+
+		if p.Type == "" || !validProtocols[strings.ToLower(p.Type)] {
+			errs = append(errs, fmt.Errorf("%s invalid or unsupported protocol", prefix))
+		}
+		if p.Target == "" {
+			errs = append(errs, fmt.Errorf("%s target cannot be empty", prefix))
+		}
+		if p.LatencyChance < 0 || p.LatencyChance > 1.0 {
+			errs = append(errs, fmt.Errorf("%s latency_chance must be between 0.0 and 1.0", prefix))
+		}
+		if p.ErrorChance < 0 || p.ErrorChance > 1.0 {
+			errs = append(errs, fmt.Errorf("%s error_chance must be between 0.0 and 1.0", prefix))
+		}
+		if p.LatencyDuration > maxLatencySafetyLimit {
+			errs = append(errs, fmt.Errorf("%s latency_duration exceeds safety limit (%v)", prefix, maxLatencySafetyLimit))
+		}
+
+		switch strings.ToLower(p.Type) {
+		case "http":
+			if p.ErrorCode != 0 && (p.ErrorCode < 100 || p.ErrorCode > 599) {
+				errs = append(errs, fmt.Errorf("%s invalid HTTP status code: %d", prefix, p.ErrorCode))
+			}
+		case "grpc":
+			if p.ErrorCode < 0 || p.ErrorCode > 16 {
+				errs = append(errs, fmt.Errorf("%s invalid gRPC status code: %d", prefix, p.ErrorCode))
+			}
+		case "resource":
+			if p.RAMChunkMB > maxRAMChunkSafetyMB {
+				errs = append(errs, fmt.Errorf("%s ram_chunk_mb exceeds %dMB threshold", prefix, maxRAMChunkSafetyMB))
+			}
+			if p.ThrottleThreshold > maxThrottleThreshold {
+				errs = append(errs, fmt.Errorf("%s throttle_threshold exceeds limit", prefix))
+			}
+		case "sql":
+			if !strings.EqualFold(p.Target, "all") && !strings.EqualFold(p.Target, "database") {
+				if _, err := regexp.Compile(p.Target); err != nil {
+					errs = append(errs, fmt.Errorf("%s invalid regex pattern: %w", prefix, err))
+				}
+			}
+		}
+	}
+
+	return errors.Join(errs...)
 }
