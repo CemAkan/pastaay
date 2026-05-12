@@ -51,12 +51,6 @@ var validProtocols = map[string]bool{
 	"mongo": true, "kafka": true, "rabbitmq": true, "resource": true,
 }
 
-const (
-	maxLatencySafetyLimit = 60 * time.Second
-	maxRAMChunkSafetyMB   = 4096
-	maxThrottleThreshold  = 1000000
-)
-
 // Validate performs strict bounds checking and protocol-specific sanity checks.
 func (c *PastaayConfig) Validate() error {
 	var errs []error
@@ -74,14 +68,22 @@ func (c *PastaayConfig) Validate() error {
 		if p.Target == "" {
 			errs = append(errs, fmt.Errorf("%s target cannot be empty", prefix))
 		}
+
+		// Logical Sanity
 		if p.LatencyChance < 0 || p.LatencyChance > 1.0 {
 			errs = append(errs, fmt.Errorf("%s latency_chance must be between 0.0 and 1.0", prefix))
 		}
 		if p.ErrorChance < 0 || p.ErrorChance > 1.0 {
 			errs = append(errs, fmt.Errorf("%s error_chance must be between 0.0 and 1.0", prefix))
 		}
-		if p.LatencyDuration > maxLatencySafetyLimit {
-			errs = append(errs, fmt.Errorf("%s latency_duration exceeds safety limit (%v)", prefix, maxLatencySafetyLimit))
+		if p.LatencyDuration < 0 {
+			errs = append(errs, fmt.Errorf("%s latency_duration cannot be negative", prefix))
+		}
+		if p.RAMChunkMB < 0 {
+			errs = append(errs, fmt.Errorf("%s ram_chunk_mb cannot be negative", prefix))
+		}
+		if p.ThrottleThreshold < 0 {
+			errs = append(errs, fmt.Errorf("%s throttle_threshold cannot be negative", prefix))
 		}
 
 		switch strings.ToLower(p.Type) {
@@ -92,13 +94,6 @@ func (c *PastaayConfig) Validate() error {
 		case "grpc":
 			if p.ErrorCode < 0 || p.ErrorCode > 16 {
 				errs = append(errs, fmt.Errorf("%s invalid gRPC status code: %d", prefix, p.ErrorCode))
-			}
-		case "resource":
-			if p.RAMChunkMB > maxRAMChunkSafetyMB {
-				errs = append(errs, fmt.Errorf("%s ram_chunk_mb exceeds %dMB threshold", prefix, maxRAMChunkSafetyMB))
-			}
-			if p.ThrottleThreshold > maxThrottleThreshold {
-				errs = append(errs, fmt.Errorf("%s throttle_threshold exceeds limit", prefix))
 			}
 		case "sql":
 			if !strings.EqualFold(p.Target, "all") && !strings.EqualFold(p.Target, "database") {
