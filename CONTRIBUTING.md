@@ -62,6 +62,10 @@ When implementing wrappers (like standard library `database/sql` drivers), be aw
 ### 4. Pointer Safety in Pipelines
 When dealing with batch operations or pipelines (e.g., Redis `ProcessPipelineHook`), do not mutate slice elements via value-copy `range` loops. Always use index-based slice mutations (`cmds[i].SetErr(redis.Nil)`) to ensure the original pointers receive the synthetic errors.
 
+### 5. The Zero-Allocation Mandate
+Pastaay's interceptors reside in the ultra-hot critical paths of the host application. You must ensure **zero memory allocation** (0 bytes) during normal evaluation (when chaos is not injected).
+* Do not use `make()`, `new()`, or allocate new structs inside the `Intercept` or `Evaluate` methods.
+* Avoid string concatenations or byte-slice copies; pass references and use standard library zero-allocation methods where possible.
 ---
 
 ## Testing
@@ -89,7 +93,11 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/). This hel
 
 ## Pull Request Process
 
-1. Ensure your code follows standard Go formatting (`go fmt ./...`).
+1. Ensure your code follows standard Go formatting
+   ```bash
+   go fmt ./...
+   go vet ./...
+    ```
 2. Update the `README.md` or `docs/` with details of changes to the interface, new configurations, or new features.
 3. Submit a Pull Request targeting the `main` branch (or the current active development branch).
 4. Provide a clear and descriptive PR title and fill out the PR description with the *Why* and *How* of your changes.

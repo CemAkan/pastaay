@@ -1,36 +1,14 @@
 <p align="center">
-  <img src="../assets/arch_header.png" alt="Architecture Header">
+  <img src="../assets/arch_header.png" alt="Architecture Header"/>
 </p>
 
-Welcome to the engine room of Pastaay. This document explains the core design decisions, memory management, and the deep OS/Compiler integrations that allow the Chaos Engine to inject faults reliably into high-throughput microservices without becoming a bottleneck.
+Welcome to the engine room. This document outlines the core design decisions, memory management strategies, and deep OS/compiler integrations that allow the chaos engine to inject faults into high-throughput microservices without becoming a bottleneck.
 
 ---
 
 ## Architecture Flow
 
-Before diving into the low-level memory operations and interceptor mechanics, here is the macro view of how Pastaay's components interact to maintain zero-allocation overhead.
-
-<p align="center">
-  <img src="../assets/arch_scheme.png" alt="Pastaay Architecture Flow">
-</p>
-
----
-
-## 1. The Policy Engine & Security Shield
-
-### Atomic Map Swap & Deterministic Logic
-Instead of evaluating the YAML file on every request, the `config.Manager` pre-computes routing maps. It now includes a **Deterministic Hash Engine** using a sorted PCG (Permuted Congruential Generator) to ensure stateful protocols like gRPC streams maintain consistency across the entire session.
-
-### The Security Evasion Shield
-Pastaay includes a multi-layered security shield to prevent chaos bypasses:
-*   **Triple-Slash Evasion:** The engine natively handles and normalizes multiple leading slashes (e.g., `////api/v1`) using aggressive path stripping, ensuring `ignored_commands` cannot be bypassed by malformed URLs.
-*   **SQL Delimiter Aggression:** The SQL cleaner now strips all standard SQL delimiters including `()`, `;`, and trailing whitespaces. A query like `(SELECT 1);` will be correctly identified as `SELECT 1` for ignore-list matching.
-
-
-### Thread-Safe Evaluation & Lock-Free RNG
-To support high-throughput streams (like Kafka), Pastaay isolates the Random Number Generator natively. It uses Go's native, lock-free PCG (Permuted Congruential Generator) RNG engine from `math/rand/v2`. This completely eliminates the need for `sync.Mutex` locking, preventing the fatal race conditions and bottlenecks that occur when thousands of concurrent goroutines attempt to generate chaos events simultaneously, ensuring thread-safety with absolute zero latency.
-
-### Engine Internals
+Pastaay is engineered for **zero-allocation overhead**. The following diagram illustrates how the components interact to perform non-blocking chaos evaluation across the stack.
 
 ```mermaid
 graph LR
@@ -43,7 +21,7 @@ graph LR
         H["<b>OS Resources (CPU/RAM)</b>"]
     end
 
-    subgraph PE ["PASTAAY ENGINE (v1.8)"]
+    subgraph PE ["PASTAAY ENGINE"]
         direction TB
 
         subgraph IL ["1. INTERCEPTOR LAYER (ZERO-ALLOCATION)"]
@@ -56,7 +34,7 @@ graph LR
             I3 ~~~ I4
             I4["API Middleware<br/>Request & Context Control"]
             I4 ~~~ I5
-            I5["<b>Resource Sabotage Trigger</b><br/>Intensity & Threshold Control"]
+            I5["<b>Resource Sabotage Trigger</b>"]
         end
 
         subgraph CE ["2. CORE EVALUATOR & TRACING"]
@@ -84,7 +62,7 @@ graph LR
         end
     end
 
-    subgraph FS ["FILE SYSTEM"]
+    subgraph FS ["FILE SYSTEM / REMOTE"]
         direction TB
         F1["pastaay.yaml"]
         F2["Amnesia-Proof Watcher"]
@@ -96,7 +74,6 @@ graph LR
         O2["Jaeger/Zipkin (Traces)"]
     end
 
-%%   VERTICAL CONNECTIONS 
     A -.-> I1
     B -.-> I2
     C -.-> I3
@@ -117,7 +94,6 @@ graph LR
     T1 ===>|gRPC / OTLP| O2
     CE ===>|Metrics| O1
 
-%% Styling
     classDef interceptor fill:#f9f5d7,stroke:#b57614,stroke-width:2px,color:#3c3836;
     classDef evaluator fill:#d3e8e1,stroke:#076678,stroke-width:2px,color:#3c3836;
     classDef memory fill:#e2d3e8,stroke:#8f3f71,stroke-width:2px,color:#3c3836;
@@ -129,83 +105,102 @@ graph LR
     class M1,M2 memory;
     class F1,F2 filesystem;
     class O1,O2 observability;
+
 ```
 
 ---
 
-## 2. Infrastructure Hooks & Interceptor Architecture
+## 1. Core Policy Logic & Security Guards
 
-Pastaay uses the **Decorator/Wrapper Pattern** to inject chaos at the lowest possible boundaries.
+### Atomic Map Swap & Deterministic Evaluation
 
-### 2.1 Message Brokers (Kafka & RabbitMQ): The Zero-Allocation Shield
-Injecting chaos into event streams requires extreme care regarding Garbage Collection (GC).
-* **Zero-Payload Memory:** Pastaay's interceptors purposefully ignore the message body (`msg.Value` or `delivery.Body`). Copying megabytes of payload data into memory to evaluate chaos would cause massive OOM (Out of Memory) crashes. Pastaay only extracts lightweight metadata (Topic/RoutingKey and Headers).
+To avoid re-parsing YAML on every request, the `config.Manager` pre-computes routing maps. It utilizes a **Deterministic Hash Engine** to ensure that stateful protocols, like gRPC streams, maintain consistency throughout their session lifecycle even during hot-reloads.
 
+### Security Evasion Shields
 
-* **Context-Aware Delays:** Pastaay never uses unconditional `time.Sleep()` for latency injection. It uses context-aware `select` channels. If the host application initiates a Graceful Shutdown, the chaos delay aborts instantly, preventing zombie goroutines from hanging the shutdown sequence.
+The engine includes multiple normalization layers to prevent chaos bypasses:
 
+* **Slash Normalization:** Aggressively strips multiple leading slashes (e.g., `////api/v1` becomes `api/v1`), ensuring ignored commands cannot be bypassed by malformed URLs.
+* **SQL Delimiter Stripping:** Cleans standard SQL delimiters like `()`, `;`, and trailing whitespace. A query like `(SELECT 1);` is correctly identified for ignore-list matching.
 
-* **Strict Type Safety:** AMQP (RabbitMQ) headers are weakly typed (`interface{}`). Pastaay enforces strict string assertions during header extraction, ensuring that an unexpected integer header never causes a Go runtime panic.
+### Thread-Safe Evaluation & Lock-Free RNG
 
-### 2.2 SQL Chaos: Avoiding The "Double-Chaos" Trap
-Pastaay registers a custom driver (`sqlchaos.Register`) and implements the standard `database/sql/driver` interfaces.
-**The Fallback Evasion Shield:** The Go `database/sql` library heavily relies on interface fallbacks. Pastaay natively detects these compiler fallbacks at runtime. By selectively suppressing chaos in `Prepare` interfaces and enforcing it directly on `Context` execution interfaces, Pastaay completely eradicates the "Double-Chaos" trap.
-
-### 2.3 Redis Pipelines: Pointer Memory Traps
-Injecting errors into a batch of pipelined Redis commands introduces significant slice memory challenges. Modifying a command via a traditional `for _, cmd := range cmds` loop creates a temporary copy, causing the error injection to silently vanish. Pastaay uses strict memory indexing (`cmds[i]`) and enforces a pre-execution chronological delay to guarantee that latency is applied *before* the physical wire message is sent.
-
-### 2.4 MongoDB & Synchronous Blocking
-Unlike SQL, MongoDB's monitor hook does not allow returning a direct error. To simulate a hard fault:
-*   **Synchronous Execution Kill:** Pastaay blocks the `Started` hook until the caller's context is canceled. This forces the driver to timeout or return a `context canceled` error to the application, providing a realistic "Abort" simulation at the wire level.
----
-
-## 3. Amnesia-Proof Daemon (Fault Tolerance)
-
-Hot-reloading a config file on Linux using standard tools (`Vim`, `Nano`, or `CI/CD`) doesn't simply "write" to a file. It creates a temporary file, deletes the original, and renames the temp file (atomic save).
-
-Naive `fsnotify` watchers go permanently blind when the original inode is deleted.
-**Pastaay's Amnesia-Proofing:**
-1. Pastaay natively traps `Rename/Remove` filesystem events.
-2. It engages an asynchronous retry loop to forcibly re-attach to the new file inode.
-3. It manually triggers a `reloadCallback` to prevent skipped write events from desyncing the policy memory.
-
-Furthermore, strict YAML validation ensures that corrupted configurations trigger an **Atomic Rollback**, maintaining the last-known-good state.
+To support massive throughput, Pastaay uses Go's native, lock-free **Permuted Congruential Generator (PCG)** from `math/rand/v2`. This eliminates `sync.Mutex` bottlenecks during random number generation across thousands of concurrent goroutines.
 
 ---
 
-## 4. Standardized Observability (Prometheus)
+## 2. Infrastructure Interceptors
 
-To ensure high-fidelity Grafana dashboards, Pastaay v1.6.2 enforces a **Standardized Labeling Convention**:
-*   **Format:** `protocol:target` (e.g., `sql:all`, `kafka:orders.events`, `grpc:/Service/Method`).
-*   **Unified Tracking:** All faults (latency, drop, error) now use these consistent tags across all 7 supported protocols, eliminating data fragmentation in multi-protocol environments.ected, Pastaay increments the counter using atomic memory operations (`sync/atomic.AddUint64`), which execute at the hardware level in sub-nanoseconds. This means observability is entirely non-blocking and lock-free.
+### Message Brokers (Kafka & RabbitMQ)
 
-## 5. OS-Level Resource Sabotage 
-Low-level resource exhaustion that bypasses standard OS and Compiler optimizations:
-* **Demand Paging Evasion:** Standard allocations are lazy. Pastaay forces physical RAM allocation by writing to every 4KB page boundary, bypassing kernel-level optimizations.
-* **Amnesia Protocol:** To ensure zero-footprint, resource goroutines use local pools. Upon context cancellation, pointers are nulled and `runtime.GC()` is invoked for immediate reclamation.
-* **Lock-Free CPU Stress:** Uses a tight loop with a configurable `throttle_threshold` for consistent stress without context-switching overhead.
+* **Zero-Payload Strategy:** Interceptors ignore message bodies to avoid OOM crashes on megabyte-scale payloads. Only lightweight metadata (Topic/RoutingKey and Headers) is evaluated.
+* **Context-Aware Delays:** Instead of `time.Sleep()`, the engine uses context-aware `select` blocks. If the host application initiates a shutdown, chaos delays abort instantly.
 
-## 6. Distributed Tracing Pipeline
+### SQL & NoSQL Drivers
 
-Pastaay provides native, zero-allocation tracing via OpenTelemetry to map chaos events directly into your microservices' distributed traces.
+* **The Fallback Shield:** Detects Go's `database/sql` internal interface fallbacks. By suppressing chaos in `Prepare` and enforcing it in `Context` execution, Pastaay avoids the "Double-Chaos" trap where a single query triggers faults multiple times.
+* **Redis Pipeline Safety:** Ensures synthetic errors are injected using index-based slice mutations (`cmds[i]`) rather than value-copy loops, preventing synthetic errors from disappearing due to memory pointer mismatches.
+* **Synchronous Mongo Blocking:** Since MongoDB's monitor hook doesn't support direct error returns, Pastaay blocks the execution hook until the caller's context is cancelled, effectively simulating a wire-level abort.
 
-### Asynchronous Telemetry
-To ensure the chaos engine never becomes a performance bottleneck, Pastaay implements the `BatchSpanProcessor`. Span data is buffered and exported asynchronously via gRPC to the OpenTelemetry Collector. If the collector becomes unreachable, the spans are dropped from the buffer silently, ensuring the host application never experiences trace-induced memory leaks or CPU blocking.
+---
+
+## 3. Reliability & Integrity
+
+### Amnesia-Proof Watcher
+
+When dynamically reloading configs, standard editors often delete the original file inode. Pastaay's watcher natively traps `Rename/Remove` events and engages an asynchronous retry loop to re-attach to the new inode instantly.
+
+### Multi-Phase Validation (The Nihilist Guard)
+
+Remote and local payloads are subjected to strict validation before mutating engine memory:
+
+* **Safety Bounds:** Rejects `latency_duration` exceeding 60s and `ram_chunk_mb` exceeding 4096MB.
+* **Atomic Rollback:** If any rule in a batch fails validation, the entire update is rejected using `errors.Join`, maintaining the last-known-good state.
+
+---
+
+## 4. Resource Sabotage Units
+
+Pastaay manipulates the host environment using low-level stressors with guaranteed cleanup:
+
+* **Demand Paging Evasion:** Standard RAM allocations are lazy. Pastaay forces physical allocation by writing to every 4KB page boundary.
+* **Amnesia Protocol:** Resource goroutines use local pools. Upon context cancellation, pointers are nulled and `runtime.GC()` is manually invoked for immediate memory reclamation.
+
+---
+
+## 5. Observability & Tracing
+
+### Standardized Labeling
+
+All faults are reported to Prometheus using a standardized `protocol:target` labeling convention (e.g., `sql:database`, `grpc:/pb.Svc/Method`). This prevents data fragmentation in multi-protocol dashboards.
+
+### Distributed Tracing (OpenTelemetry)
+
+Pastaay features native, zero-allocation tracing via OpenTelemetry.
+
+* **Asynchronous Telemetry:** Utilizes a `BatchSpanProcessor` to flush spans asynchronously via gRPC.
+* **Resiliency:** If the OTel Collector is unreachable, spans are dropped silently. The tracing pipeline will never block the application's critical path or leak goroutines.
+
+---
 
 ### Appendix: OpenTelemetry Span Reference
+
 Pastaay generates specific span names based on the protocol and the type of fault injected. You can search for these exact span names in your tracing UI (Jaeger/Zipkin):
 
 **HTTP & gRPC:**
+
 * `pastaay.http.latency` / `pastaay.http.error`
 * `pastaay.grpc.latency` / `pastaay.grpc.error`
 
 **Databases & Caches:**
+
 * `pastaay.sql.latency` / `pastaay.sql.error`
 * `pastaay.mongo.latency` / `pastaay.mongo.error`
 * `pastaay.redis.latency` / `pastaay.redis.error`
 * `pastaay.redis.pipeline_latency` / `pastaay.redis.pipeline_error` *(Pipeline batches)*
 
 **Message Brokers:**
+
 * `pastaay.kafka.latency` / `pastaay.kafka.error`
 * `pastaay.kafka.drop` *(Silent message omission)*
 * `pastaay.rabbitmq.latency` / `pastaay.rabbitmq.error`
