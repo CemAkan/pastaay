@@ -1,9 +1,8 @@
-
 <p align="center">
   <img src="../assets/conf_header.png" alt="Configuration Header">
 </p>
 
-The `pastaay.yaml` file is the heart of the chaos engine. With the introduction of **Smart Mode in v1.5.1**, the configuration supports global protection rules, granular targeting, and case-insensitive policy matching.
+The `pastaay.yaml` file is the heart of the chaos engine. The configuration supports global protection rules, granular targeting, and case-insensitive policy matching.
 
 ## Global Settings
 
@@ -20,12 +19,27 @@ These settings govern the overall behavior of the Pastaay engine and protect you
 
 ---
 
+## Engine Integrity Guard
+
+Pastaay operates on the principle of **Unrestricted Chaos**. The engine assumes the operator is a domain expert and does not enforce arbitrary "babysitting" limits on latency durations or memory exhaustion. If you want to simulate a 5-hour network partition or exhaust 256GB of RAM, the engine will blindly execute it.
+
+However, to prevent the chaos engine *itself* from crashing due to malformed payloads, it enforces strict structural validation before any memory swap:
+
+* **Memory Bounds (Network Layer):** Webhook and K8s sensors implement bounded readers (1MB for webhooks, 5MB for ConfigMaps) to prevent OS-level memory exhaustion during payload deserialization.
+* **Logical Sanity:** Rejects negative probabilities, negative durations, and negative resource allocations.
+* **Protocol Sanity:**
+    * **HTTP:** Error codes must be within the `100-599` range.
+    * **gRPC:** Status codes must follow the official spec (`0-16`).
+    * **SQL:** Targets are pre-compiled as regex; invalid patterns are rejected instantly.
+* **Atomic Rollback:** If any policy within a batch fails structural validation, the entire payload is rejected using `errors.Join`, maintaining the last-known-good state.
+---
+
 ## Deep Dive: Customizing `ignored_commands` & Anti-Bypass
 
 ### Crucial Matching Rules:
 
 * **Case-Insensitivity**: All targets and incoming commands are normalized to `UPPERCASE` before evaluation.
-* **SQL Stripping**: The engine strips all standard SQL delimiters, including parentheses `()` and semicolons `;`. A query like `(SELECT 1)`; matches `SELECT 1` in your policies.
+* **SQL Stripping**: The engine strips all standard SQL delimiters, including parentheses `()` and semicolons `;`. A query like `(SELECT 1);` matches `SELECT 1` in your policies.
 * **Slash Normalization**: Leading slashes in HTTP/gRPC paths are normalized. `///api/ping` will match `api/ping`.
 
 ### Complete Map Example:
@@ -72,38 +86,20 @@ Each policy in the `policies` list supports the following fields to precisely ta
 
 ---
 
-This information should be placed within the `docs/configuration.md` file, specifically under the **"gRPC Chaos"** subsection within the **"Target Types & Granular Fault Behavior"** section. It should also be reflected as a field in the **"Policy Structure"** table.
+### **Fault Diagnosis (Validation Rules)**
 
-Here is the professional English translation and technical breakdown for your documentation:
+Pastaay maintains absolute stability by enforcing structural rules. If a policy is rejected, the engine continues to run with the last known stable configuration.
 
----
+| Logic | Rule | Reason for Rejection |
+| --- | --- | --- |
+| **Probability** | `0.0 <= chance <= 1.0` | Probability theory constraints. |
+| **Duration** | `duration >= 0` | Negative time causes system clock instability. |
+| **Resources** | `mb >= 0`, `intensity >= 0` | Negative resource allocation is logically impossible. |
+| **HTTP Spec** | `100 <= code <= 599` | Codes outside this range break standard HTTP clients. |
+| **gRPC Spec** | `0 <= code <= 16` | Codes must follow the official Google gRPC status spec. |
+| **SQL Regex** | Must be valid Regex | Invalid regex strings prevent query matching and could panic. |
 
-### **gRPC Chaos: Deterministic Stream Logic (Dice Logic)**
-
-Long-lived gRPC streams require high consistency to avoid breaking application-level state machines. The `stream_roll_mode` defines when the Chaos Engine "rolls the dice" to determine if a fault should be injected.
-
-*   **`stream` (Default):**
-    *   The dice is rolled exactly **once** at the initiation of the stream.
-    *   The decision (Latency or Error) is stored in the `decidedPolicies` map.
-    *   This result is applied consistently to every message throughout the stream's lifecycle.
-    *   **Use Case:** This is the safest way to simulate total link failure or constant degradation without triggering illegal state transitions in the Go gRPC runtime.
-
-*   **`message`:**
-    *   The dice is rolled independently for **every** `SendMsg` or `RecvMsg` call.
-    *   Decisions are not cached.
-    *   **Use Case:** Ideal for simulating intermittent glitches, packet loss, or sporadic jitter in high-frequency data streams.
-
-
-*   **FNV-1a Fingerprinting:**
-    *   Pastaay utilizes an FNV-1a based fingerprinting algorithm to generate a `PolicyHash`.
-    *   This hash ensures that the engine recognizes the specific policy identity even during a **hot-reload**.
-    *   This allows active streams to maintain their "Chaos Fate" consistently even if the `pastaay.yaml` file is modified and re-parsed while the stream is open.
-
----
-
-**Note for Implementation:** Ensure you update the **Policy Structure** table to include the `stream_roll_mode` field as an optional string for the `grpc` type.
-
-
+> **Note:** There are no upper limits on duration or memory. The engine follows the **Unrestricted Chaos** philosophy, if you choose to nuke your system with extreme values, the engine will proceed.
 
 ---
 
@@ -119,6 +115,13 @@ Every fault injected by Pastaay is reported to Prometheus. For granular filterin
 | **Kafka** | `kafka:topic_name` | Exact topic name. |
 | **RabbitMQ** | `rabbitmq:routing_key`| Exact routing key or queue. |
 | **Redis** | `redis:get` | Exact command name or `all`. |
+
+## Remote Control Health Metrics
+
+|Metric|Type|Labels|Description|
+|:---|:---|:---|:---|
+|`pastaay_remote_sensor_status`|Gauge|`sensor`|`1`: Healthy, `0`: Disconnected or Invalid Payload.|
+
 
 ---
 
@@ -181,4 +184,3 @@ Pastaay is hardened against the "Linux File-Save Amnesia" bug. Standard editors 
 * **Re-attachment**: It engages an asynchronous retry loop to re-attach the fsnotify watcher to the new file inode instantly, ensuring zero configuration downtime.
 
 ---
-y uses a `BatchSpanProcessor. Spans are flushed asynchronously and will never block your application's critical path, even if the collector goes offline.*
