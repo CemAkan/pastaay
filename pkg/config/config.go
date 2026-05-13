@@ -25,6 +25,7 @@ type Policy struct {
 	RAMInterval       time.Duration     `yaml:"ram_interval,omitempty"`
 	CompiledRegex     *regexp.Regexp    `yaml:"-"`
 	PolicyHash        uint64            `yaml:"-"`
+	MetricTag         string            `yaml:"-"`
 	IsWildcard        bool              `yaml:"-"`
 	WildcardPrefix    string            `yaml:"-"`
 }
