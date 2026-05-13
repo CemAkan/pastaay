@@ -30,7 +30,8 @@ type k8sConfigMap struct {
 
 // WatchK8sConfigMap polls K8s API and reports health status to the Manager.
 func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.Duration, mgr *Manager) error {
-	token, err := os.ReadFile(k8sTokenPath)
+
+	_, err := os.ReadFile(k8sTokenPath)
 	if err != nil {
 		mgr.SetSensorStatus("k8s", "token_missing")
 		return fmt.Errorf("k8s token missing: %w", err)
@@ -67,11 +68,18 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				// Read token freshly on each tick to handle Kubelet SA token rotation
+				freshToken, err := os.ReadFile(k8sTokenPath)
+				if err != nil {
+					mgr.SetSensorStatus("k8s", "token_missing")
+					continue
+				}
+
 				req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 				if err != nil {
 					continue
 				}
-				req.Header.Set("Authorization", "Bearer "+string(token))
+				req.Header.Set("Authorization", "Bearer "+string(freshToken))
 
 				resp, err := client.Do(req)
 				if err != nil {
