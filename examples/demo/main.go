@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/CemAkan/pastaay/pkg/brokerchaos"
+	"github.com/CemAkan/pastaay/pkg/chaos"
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
 	"github.com/CemAkan/pastaay/pkg/mongochaos"
@@ -56,7 +58,7 @@ func main() {
 	shutdownOTel, err := tracing.InitProvider(mainCtx, getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""))
 	if err != nil {
 		log.Printf("[WARN] OpenTelemetry initialization failed. Tracing disabled: %v", err)
-		shutdownOTel = func(context.Context) error { return nil } // Fallback to No-Op
+		shutdownOTel = func(context.Context) error { return nil }
 	}
 	defer func() {
 		log.Println("[INFO] Finalizing OpenTelemetry: Flushing spans...")
@@ -82,7 +84,9 @@ func main() {
 	if webhookToken == "" {
 		log.Println("[WARN] PASTAAY_WEBHOOK_TOKEN is empty. Webhook endpoint is unprotected!")
 	}
+
 	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(webhookToken, cfgManager.Update))
+	adminMux.HandleFunc("/chaos/export", config.ExportHandler(cfgManager))
 
 	go func() {
 		log.Println("[INFO] Pastaay Admin Server listening on :2112")
@@ -124,7 +128,6 @@ func main() {
 				statuses := cfgManager.GetSensorStatuses()
 				for sensor, status := range statuses {
 					val := 0.0
-					
 					if status == "healthy" || status == "connected" || status == "initializing" {
 						val = 1.0
 					}
@@ -135,12 +138,16 @@ func main() {
 	}()
 
 	// Broker & Background Lifecycles
-	wg.Add(3)
+	wg.Add(4)
 	go initKafka(mainCtx, cfgManager, &wg)
 	go initRabbitMQ(mainCtx, cfgManager, &wg)
 	go startBackgroundPinger(mainCtx, &wg)
+	go func() {
+		defer wg.Done()
+		chaos.MonitorAndTrigger(mainCtx, cfgManager)
+	}()
 
-	// 7. Hardened Server Setup
+	// Hardened Server Setup
 	mux := setupRouter(cfgManager, rdb, db, mClient)
 	chaosHandler := ritual.Middleware(cfgManager)(mux)
 
@@ -398,6 +405,7 @@ func startBackgroundPinger(ctx context.Context, wg *sync.WaitGroup) {
 				continue
 			}
 			if resp, err := client.Do(req); err == nil {
+				io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
 			}
 		}

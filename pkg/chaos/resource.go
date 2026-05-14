@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/CemAkan/pastaay/pkg/config"
 )
 
 // ResourcePolicy holds the configuration for OS-level resource sabotage.
@@ -24,7 +26,7 @@ type ResourcePolicy struct {
 	}
 }
 
-// BurnCPU locks the processor by bypassing compiler optimizations with local sinks.
+// BurnCPU locks the processor by bypassing compiler optimizations.
 func BurnCPU(ctx context.Context, cores int, threshold int) {
 	if cores <= 0 {
 		cores = runtime.NumCPU()
@@ -57,7 +59,7 @@ func BurnCPU(ctx context.Context, cores int, threshold int) {
 	wg.Wait()
 }
 
-// LeakRAM exhausts physical RAM by evading the OS Demand Paging mechanism.
+// LeakRAM exhausts physical RAM via page-forcing.
 func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	if interval <= 0 {
 		interval = 1 * time.Second
@@ -71,7 +73,7 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	// DRY allocation logic
 	allocate := func() {
 		chunk := make([]byte, chunkSize)
-		// Page-forcing: Bypassing lazy allocation
+		// Page-forcing
 		for i := 0; i < chunkSize; i += 4096 {
 			chunk[i] = 1
 		}
@@ -83,7 +85,7 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Amnesia Protocol: Immediate cleanup
+			// Immediate cleanup
 			pool = nil
 			runtime.GC()
 			return
@@ -93,21 +95,95 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	}
 }
 
-// TriggerResourceSabotage asynchronously starts resource exhaustion based on policy.
-func TriggerResourceSabotage(policy ResourcePolicy) {
+// TriggerResourceSabotage safely dispatches resource chaos.
+func TriggerResourceSabotage(ctx context.Context, policy ResourcePolicy) {
 	if policy.CPU.Enabled {
-		ctx, cancel := context.WithTimeout(context.Background(), policy.CPU.Duration)
-		go func() {
-			defer cancel()
-			BurnCPU(ctx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
-		}()
+		if policy.CPU.Duration > 0 {
+			cpuCtx, cancel := context.WithTimeout(ctx, policy.CPU.Duration)
+			go func() {
+				defer cancel()
+				BurnCPU(cpuCtx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
+			}()
+		} else {
+			// Zero-duration bypass to prevent immediate suicide
+			go BurnCPU(ctx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
+		}
 	}
 
 	if policy.RAM.Enabled {
-		ctx, cancel := context.WithTimeout(context.Background(), policy.RAM.Duration)
-		go func() {
-			defer cancel()
-			LeakRAM(ctx, policy.RAM.ChunkMB, policy.RAM.Interval)
-		}()
+		if policy.RAM.Duration > 0 {
+			ramCtx, cancel := context.WithTimeout(ctx, policy.RAM.Duration)
+			go func() {
+				defer cancel()
+				LeakRAM(ramCtx, policy.RAM.ChunkMB, policy.RAM.Interval)
+			}()
+		} else {
+			go LeakRAM(ctx, policy.RAM.ChunkMB, policy.RAM.Interval)
+		}
+	}
+}
+
+// MonitorAndTrigger runs as a daemon to handle resource sabotage lifecycle safely.
+func MonitorAndTrigger(ctx context.Context, mgr *config.Manager) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var lastResourceHash uint64
+	var activeCancel context.CancelFunc
+
+	for {
+		select {
+		case <-ctx.Done():
+			if activeCancel != nil {
+				activeCancel()
+			}
+			return
+		case <-ticker.C:
+			policies := mgr.GetActivePolicies("resource")
+
+			// Immediate kill-switch on rollback
+			if len(policies) == 0 {
+				if activeCancel != nil {
+					activeCancel()
+					activeCancel = nil
+					lastResourceHash = 0
+				}
+				continue
+			}
+
+			var combinedHash uint64
+			for _, p := range policies {
+				combinedHash = (combinedHash<<1 | combinedHash>>63) ^ p.PolicyHash
+			}
+
+			if combinedHash != lastResourceHash {
+				// Kill previous chaos if any
+				if activeCancel != nil {
+					activeCancel()
+				}
+
+				lastResourceHash = combinedHash
+
+				var chaosCtx context.Context
+				chaosCtx, activeCancel = context.WithCancel(ctx)
+
+				for _, p := range policies {
+					rp := ResourcePolicy{}
+					if p.LatencyDuration > 0 {
+						rp.CPU.Enabled = true
+						rp.CPU.Duration = p.LatencyDuration
+						rp.CPU.Cores = 0
+						rp.CPU.ThrottleThreshold = p.ThrottleThreshold
+					}
+					if p.RAMChunkMB > 0 {
+						rp.RAM.Enabled = true
+						rp.RAM.ChunkMB = p.RAMChunkMB
+						rp.RAM.Interval = p.RAMInterval
+						rp.RAM.Duration = p.LatencyDuration
+					}
+					TriggerResourceSabotage(chaosCtx, rp)
+				}
+			}
+		}
 	}
 }
