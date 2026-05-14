@@ -40,7 +40,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() error {
-	buildSeniorHelpTemplate()
+	buildCustomHelpTemplate()
 	return rootCmd.Execute()
 }
 
@@ -55,8 +55,7 @@ func init() {
 	}
 }
 
-func buildSeniorHelpTemplate() {
-
+func buildCustomHelpTemplate() {
 	groups := []struct {
 		ID    string
 		Title string
@@ -88,9 +87,9 @@ func buildSeniorHelpTemplate() {
 
 ` + cBold + cCyan + `USAGE` + cReset + `
   {{.UseLine}}
-{{if .HasAvailableSubCommands}}{{range .Groups}}
-{{.Title}}{{range $.Commands}}{{if eq .GroupID $.ID}}
-  ` + cBold + `{{rpad .Name 15}}` + cReset + ` ` + cGray + `{{.Short}}` + cReset + `{{end}}{{end}}
+{{if .HasAvailableSubCommands}}{{range $group := .Groups}}
+{{$group.Title}}{{range $cmd := $.Commands}}{{if eq $cmd.GroupID $group.ID}}
+  ` + cBold + `{{rpad $cmd.Name 15}}` + cReset + ` ` + cGray + `{{$cmd.Short}}` + cReset + `{{end}}{{end}}
 {{end}}{{end}}
 ` + cBold + cCyan + `GLOBAL FLAGS` + cReset + `
 {{.PersistentFlags.FlagUsages | trimTrailingWhitespaces}}
