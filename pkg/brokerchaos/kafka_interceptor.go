@@ -44,13 +44,12 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 			return "", false
 		},
 	}
+	
+	shouldDrop, delay, evalErr, latencyTag, errorTag := m.evaluator.Evaluate(ctx, msgCtx)
 
-	shouldDrop, delay, evalErr := m.evaluator.Evaluate(ctx, msgCtx)
-	metricTag := "kafka:" + msg.Topic
-
-	if delay > 0 {
-		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
-		spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.latency", msg.Topic, "latency")
+	if delay > 0 && latencyTag != "" {
+		metrics.InjectedFaultsTotal.WithLabelValues(latencyTag, "latency").Inc()
+		spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.latency", latencyTag, "latency")
 
 		timer := time.NewTimer(delay)
 		select {
@@ -64,15 +63,15 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 		}
 	}
 
-	if shouldDrop {
-		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "drop").Inc()
-		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.drop", msg.Topic, "drop")
+	if shouldDrop && errorTag != "" {
+		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "drop").Inc()
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.drop", errorTag, "drop")
 		span.End()
 		return true, nil
 	}
-	if evalErr != nil {
-		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
-		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.error", msg.Topic, "error")
+	if evalErr != nil && errorTag != "" {
+		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "error").Inc()
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.error", errorTag, "error")
 		span.End()
 		return true, evalErr
 	}

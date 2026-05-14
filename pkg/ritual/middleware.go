@@ -1,6 +1,7 @@
 package ritual
 
 import (
+	"io"
 	"math/rand/v2"
 	"net/http"
 	"strings"
@@ -21,7 +22,9 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 			policies := mgr.GetActivePolicies("http")
 			for _, p := range policies {
 				if matchPath(r.URL.Path, &p) && matchHeaders(r, p.MatchHeaders) {
-					metricTag := "http:" + p.Target
+
+					metricTag := p.MetricTag
+
 					if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 						metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
 						ctx, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.latency", p.Target, "latency")
@@ -48,7 +51,9 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 						}
 						w.Header().Set("Content-Type", "application/json")
 						w.WriteHeader(status)
-						w.Write([]byte(p.ErrorBody))
+						
+						io.WriteString(w, p.ErrorBody)
+
 						span.End()
 						return
 					}
@@ -77,7 +82,7 @@ func matchPath(reqPath string, p *config.Policy) bool {
 
 func matchHeaders(r *http.Request, required map[string]string) bool {
 	for k, v := range required {
-		if r.Header.Get(k) != v {
+		if !strings.EqualFold(r.Header.Get(k), v) {
 			return false
 		}
 	}

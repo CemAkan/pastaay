@@ -73,7 +73,7 @@ func applyConnectionChaos(mgr *config.Manager) error {
 				chance = 1.0
 			}
 			if rand.Float64() < chance {
-				metrics.InjectedFaultsTotal.WithLabelValues("sql:"+p.Target, "drop").Inc()
+				metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
 				return errors.New("[Pastaay-SQL] Chaos: TCP connection forcefully dropped")
 			}
 		}

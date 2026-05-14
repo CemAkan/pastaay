@@ -28,7 +28,7 @@ func NewChaosDialer(mgr *config.Manager, baseDialer DialerFunc) DialerFunc {
 					chance = 1.0
 				}
 				if rand.Float64() < chance {
-					metrics.InjectedFaultsTotal.WithLabelValues("redis:"+p.Target, "drop").Inc()
+					metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
 					return nil, errors.New("[Pastaay-Redis] Chaos: TCP connection forcefully dropped")
 				}
 			}
