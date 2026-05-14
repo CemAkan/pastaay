@@ -100,15 +100,21 @@ func (m *Manager) Update(newCfg *PastaayConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if newCfg != nil {
+
 		for i := range newCfg.Policies {
+
 			p := &newCfg.Policies[i]
-			// Metric Tag Pre-computation
-			p.MetricTag = p.Type + ":" + p.Target
+
+			tag := p.Type + ":" + p.Target
+			if len(tag) > 64 {
+				tag = tag[:61] + "..."
+			}
+			p.MetricTag = tag
 
 			// SQL Smart Boundary & Regex
 			if strings.EqualFold(p.Type, "sql") && !strings.EqualFold(p.Target, "ALL") && !strings.EqualFold(p.Target, "DATABASE") {
 				targetPattern := p.Target
-				
+
 				isAlphaNum := true
 				for _, char := range targetPattern {
 					if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_') {

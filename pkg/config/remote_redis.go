@@ -32,7 +32,7 @@ func WatchRedisPubSub(ctx context.Context, client *redis.Client, channel string,
 			if err != nil {
 				mgr.SetSensorStatus("redis", "error")
 				pubsub.Close()
-				
+
 				select {
 				case <-ctx.Done():
 					return
@@ -94,7 +94,7 @@ func sendAck(ctx context.Context, client *redis.Client, channel string, wg *sync
 		if wg != nil {
 			defer wg.Done()
 		}
-		ackCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		ack := RedisAck{Status: status, Message: message}
 		if payload, err := json.Marshal(ack); err == nil {
