@@ -31,7 +31,9 @@ func (h *ChaosHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 		policies := h.mgr.GetActivePolicies("redis")
 		for _, p := range policies {
 			if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, cmd.Name()) {
-				metricTag := "redis:" + p.Target
+
+				metricTag := p.MetricTag
+
 				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 					metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
 					spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.redis.latency", cmd.Name(), "latency")
@@ -62,7 +64,8 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 	return func(ctx context.Context, cmds []redis.Cmder) error {
 		policies := h.mgr.GetActivePolicies("redis")
 		var maxLatency time.Duration
-		var bestMetricTag string
+		var latencyTag string
+		var errorTag string
 		hasError := false
 
 		for i := range cmds {
@@ -75,18 +78,19 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 					if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 						if p.LatencyDuration > maxLatency {
 							maxLatency = p.LatencyDuration
-							bestMetricTag = "redis:" + p.Target
+							latencyTag = p.MetricTag
 						}
 					}
 					if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 						hasError = true
+						errorTag = p.MetricTag
 					}
 				}
 			}
 		}
 
 		if maxLatency > 0 {
-			metrics.InjectedFaultsTotal.WithLabelValues(bestMetricTag, "latency").Inc()
+			metrics.InjectedFaultsTotal.WithLabelValues(latencyTag, "latency").Inc()
 			spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.redis.pipeline_latency", "pipeline", "latency")
 			timer := time.NewTimer(maxLatency)
 			select {
@@ -102,8 +106,8 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 
 		if hasError {
 			targetTag := "redis:all"
-			if bestMetricTag != "" {
-				targetTag = bestMetricTag
+			if errorTag != "" {
+				targetTag = errorTag
 			}
 			metrics.InjectedFaultsTotal.WithLabelValues(targetTag, "error").Inc()
 			_, span := tracing.StartChaosSpan(ctx, "pastaay.redis.pipeline_error", "pipeline", "error")

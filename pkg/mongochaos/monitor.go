@@ -23,7 +23,8 @@ func NewChaosMonitor(mgr *config.Manager) *event.CommandMonitor {
 			policies := mgr.GetActivePolicies("mongo")
 			for _, p := range policies {
 				if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, evt.CommandName) {
-					metricTag := "mongo:" + p.Target
+
+					metricTag := p.MetricTag
 
 					if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 						metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
@@ -47,11 +48,8 @@ func NewChaosMonitor(mgr *config.Manager) *event.CommandMonitor {
 						span.End()
 
 						log.Printf("[Pastaay-Mongo] Chaos: aborting command %s by blocking execution", evt.CommandName)
-
-						select {
-						case <-ctx.Done():
-						case <-time.After(30 * time.Second):
-						}
+						
+						<-ctx.Done()
 						return
 					}
 				}

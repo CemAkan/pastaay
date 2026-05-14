@@ -42,15 +42,21 @@ func applySQLChaos(ctx context.Context, mgr *config.Manager, cleanQuery string) 
 
 	policies := mgr.GetActivePolicies("sql")
 	currentCtx := ctx
+	shieldApplied := false // GOD-LEVEL YAMA: Kalkan durumunu takip et
 
 	for _, p := range policies {
 		if isTargetMatch(cleanQuery, &p) {
-			evalCtx := context.WithValue(currentCtx, chaosKey{}, true)
-			metricTag := "sql:" + p.Target
+			// YAMA: Eşleşme anında kalkanı doğrudan currentCtx'e zımbala! (Amnezi engellendi)
+			if !shieldApplied {
+				currentCtx = context.WithValue(currentCtx, chaosKey{}, true)
+				shieldApplied = true
+			}
+
+			metricTag := p.MetricTag
 
 			if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
-				spanCtx, span := tracing.StartChaosSpan(evalCtx, "pastaay.sql.latency", p.Target, "latency")
+				spanCtx, span := tracing.StartChaosSpan(currentCtx, "pastaay.sql.latency", p.Target, "latency")
 
 				timer := time.NewTimer(p.LatencyDuration)
 				select {
@@ -60,18 +66,18 @@ func applySQLChaos(ctx context.Context, mgr *config.Manager, cleanQuery string) 
 				case <-spanCtx.Done():
 					timer.Stop()
 					span.End()
-					return spanCtx, spanCtx.Err()
+					return currentCtx, spanCtx.Err()
 				}
 			}
 			if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
-				_, span := tracing.StartChaosSpan(evalCtx, "pastaay.sql.error", p.Target, "error")
+				_, span := tracing.StartChaosSpan(currentCtx, "pastaay.sql.error", p.Target, "error")
 				span.End()
 				msg := p.ErrorBody
 				if msg == "" {
 					msg = "sql: database connection is closed"
 				}
-				return evalCtx, errors.New(msg)
+				return currentCtx, errors.New(msg)
 			}
 		}
 	}

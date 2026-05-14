@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -43,7 +44,7 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 		return fmt.Errorf("k8s namespace missing: %w", err)
 	}
 
-	url := fmt.Sprintf("https://%s/api/v1/namespaces/%s/configmaps/%s", k8sHost, string(ns), cmName)
+	url := fmt.Sprintf("https://%s/api/v1/namespaces/%s/configmaps/%s", k8sHost, strings.TrimSpace(string(ns)), cmName)
 	mgr.SetSensorStatus("k8s", "initializing")
 
 	transport := &http.Transport{
@@ -68,7 +69,7 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Read token freshly on each tick to handle Kubelet SA token rotation
+				// Read token freshly
 				freshToken, err := os.ReadFile(k8sTokenPath)
 				if err != nil {
 					mgr.SetSensorStatus("k8s", "token_missing")
@@ -79,7 +80,8 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 				if err != nil {
 					continue
 				}
-				req.Header.Set("Authorization", "Bearer "+string(freshToken))
+
+				req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(freshToken)))
 
 				resp, err := client.Do(req)
 				if err != nil {
@@ -87,9 +89,19 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 					continue
 				}
 
+				if resp.StatusCode != http.StatusOK {
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					mgr.SetSensorStatus("k8s", fmt.Sprintf("http_%d", resp.StatusCode))
+					continue
+				}
+
 				var cm k8sConfigMap
 				err = json.NewDecoder(io.LimitReader(resp.Body, 5<<20)).Decode(&cm)
+
+				io.Copy(io.Discard, io.LimitReader(resp.Body, 1024*1024))
 				resp.Body.Close()
+
 				if err != nil {
 					mgr.SetSensorStatus("k8s", "decode_error")
 					continue

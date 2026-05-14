@@ -9,16 +9,16 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-var isReattaching atomic.Bool
-
 func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
+
 	var timer *time.Timer
 	var timerMu sync.Mutex
 	var reattachMu sync.Mutex
+	var isReattaching atomic.Bool
 
 	go func() {
 		defer watcher.Close()
@@ -64,7 +64,6 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 						reloadCallback(newCfg)
 					})
 					timerMu.Unlock()
-				
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
