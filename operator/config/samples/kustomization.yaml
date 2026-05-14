@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- chaos_v1_chaospolicy.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
