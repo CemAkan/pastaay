@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.9.0-blue.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v2.0.0-stable.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
@@ -18,6 +18,7 @@
 * **Self-Aware Sensors:** Real-time health monitoring and asynchronous telemetry for all remote control providers (K8s, Redis, Webhooks).
 * **Resource Sabotage:** Simulate CPU starvation and memory leaks with guaranteed cleanup via the Amnesia Protocol.
 * **Distributed Tracing:** Zero-allocation OpenTelemetry (OTLP) integration for visualizing chaos events across microservices without goroutine leaks.
+* **Kinetic Control Plane:** Fleet-wide chaos orchestration via the **`pastaayctl`** CLI, featuring imperative strikes, SLA-guarded autopilot experiments, and real-time telemetry dashboards.
 
 ---
 
@@ -62,9 +63,9 @@ Pastaay is a continuously evolving enterprise chaos engineering suite. Our devel
 
 | Phase | Theme | Architecture Goals |
 | :--- | :--- | :--- |
-| **Current** | **The Cloud-Native Bridge** | Remote Control Sensors (K8s ConfigMap Watchers, Redis PubSub listeners, AWS FIS webhooks). Multi-phase validation guards and real-time health telemetry. |
-| **Next** | **The Command Center** | Centralized Ecosystem: Kubernetes Operator (`pastaay-operator` via CRDs) and the **`pastaayctl`** CLI tool for fleet-wide chaos management. |
-| **Future** | **GitOps & Autopilot** | Native GitHub Actions/GitLab CI integrations for Chaos-as-Code. ML-driven blast radius adjustments based on baseline traffic analysis. |
+| **Current (v2.0)** | **The Kinetic Ecosystem** | Enterprise CLI (`pastaayctl`), Kubernetes Operator (`pastaay-operator` via CRDs), SLA-guarded autopilot, and multi-phase validation guards. |
+| **Next (v2.1)** | **GitOps & Pipelines** | Native GitHub Actions and GitLab CI integrations for Chaos-as-Code and automated deployment rollbacks. |
+| **Future** | **Web Console & AI Intelligence** | Centralized web dashboard for direct fleet management, visual impact analysis, interactive documentation, and ML-driven blast radius adjustments. |
 
 ---
 
@@ -74,6 +75,7 @@ Dive deep into Pastaay's mechanics using our official documentation:
 * [The Configuration Guide](docs/configuration.md) - Learn how to write policies, target endpoints, and control the blast radius.
 * [Architecture & Engine](docs/architecture.md) - Understand how the Policy Engine achieves zero-latency lookups, and how we solved deep OS/Compiler integration constraints.
 * [Remote Control & Cloud-Native Sensors](docs/remote_control.md) - Learn how to securely control chaos across massive fleets via Redis, Kubernetes, or Webhooks.
+* [pastaayctl: Kinetic Control Plane Reference](docs/pastaayctl.md) - Master the CLI to orchestrate fleet-wide chaos, run SLA-guarded autopilot experiments, and monitor real-time kinetic impact.
 
 ---
 ##  Installation

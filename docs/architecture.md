@@ -12,6 +12,9 @@ Pastaay is engineered for **zero-allocation overhead**. The following diagram il
 
 ```mermaid
 graph LR
+%% External Control Plane
+    CTL["<b>pastaayctl</b><br/>(CLI Orchestrator)"]
+
     subgraph HOST ["Host Application & Environment"]
         direction TB
         A["Kafka / RabbitMQ Consumer"]
@@ -74,6 +77,7 @@ graph LR
         O2["Jaeger/Zipkin (Traces)"]
     end
 
+%% Application Flow
     A -.-> I1
     B -.-> I2
     C -.-> I3
@@ -87,6 +91,11 @@ graph LR
 
     E4 & E5 -.->|Sabotage| H
 
+%% Control Plane Connections
+    CTL == "HTTP/JSON Webhook" ==> I4
+    CTL == "Redis PubSub" ==> M1
+
+%% Configuration & Metrics Flow
     F1 --> F2
     F2 --> M2
     M2 ==>|Updates| M1
@@ -94,17 +103,20 @@ graph LR
     T1 ===>|gRPC / OTLP| O2
     CE ===>|Metrics| O1
 
+%% Styling
     classDef interceptor fill:#f9f5d7,stroke:#b57614,stroke-width:2px,color:#3c3836;
     classDef evaluator fill:#d3e8e1,stroke:#076678,stroke-width:2px,color:#3c3836;
     classDef memory fill:#e2d3e8,stroke:#8f3f71,stroke-width:2px,color:#3c3836;
     classDef filesystem fill:#d5e8d3,stroke:#427b58,stroke-width:2px,color:#3c3836;
     classDef observability fill:#f2e5bc,stroke:#d65d0e,stroke-width:2px,color:#3c3836;
+    classDef control fill:#d3e8f9,stroke:#20639b,stroke-width:2px,color:#3c3836;
 
     class I1,I2,I3,I4,I5 interceptor;
     class E1,E2,E3,E4,E5,T1 evaluator;
     class M1,M2 memory;
     class F1,F2 filesystem;
     class O1,O2 observability;
+    class CTL control;
 
 ```
 
@@ -126,6 +138,9 @@ The engine includes multiple normalization layers to prevent chaos bypasses:
 ### Thread-Safe Evaluation & Lock-Free RNG
 
 To support massive throughput, Pastaay uses Go's native, lock-free **Permuted Congruential Generator (PCG)** from `math/rand/v2`. This eliminates `sync.Mutex` bottlenecks during random number generation across thousands of concurrent goroutines.
+
+### Metric Cardinality Protection
+The engine implements a **high-entropy label guard** within the `Manager.Update` lifecycle. All `MetricTag` labels are strictly truncated to 64 characters. This prevents "Prometheus RAM Explosion" in production environments if a user provides dynamic or excessively long strings (e.g., raw SQL queries) as chaos targets.
 
 ---
 
@@ -157,6 +172,10 @@ Remote and local payloads are subjected to strict validation before mutating eng
 * **Safety Bounds:** Rejects `latency_duration` exceeding 60s and `ram_chunk_mb` exceeding 4096MB.
 * **Atomic Rollback:** If any rule in a batch fails validation, the entire update is rejected using `errors.Join`, maintaining the last-known-good state.
 
+### Remote Sensor Hardening
+* **Kubernetes Watcher:** Implements a **5MB bounded JSON stream decoder**. By bypassing `io.ReadAll`, the engine prevents OOM (Out of Memory) spikes during massive ConfigMap rotations in large Kubernetes fleets.
+* **Redis Telemetry (Robust ACKs):** Asynchronous acknowledgments utilize `context.WithoutCancel(ctx)`. This ensures that even during a process `SIGTERM` shutdown, the final "Applied" signal has a 2-second grace period to reach the control plane before the TCP connection is severed.
+
 ---
 
 ## 4. Resource Sabotage Units
@@ -180,6 +199,16 @@ Pastaay features native, zero-allocation tracing via OpenTelemetry.
 
 * **Asynchronous Telemetry:** Utilizes a `BatchSpanProcessor` to flush spans asynchronously via gRPC.
 * **Resiliency:** If the OTel Collector is unreachable, spans are dropped silently. The tracing pipeline will never block the application's critical path or leak goroutines.
+
+---
+
+## 6. The Control Plane (pastaayctl)
+
+Pastaay includes a senior-grade CLI designed to act as a centralized **Kinetic Control Plane**. It manages the lifecycle of chaos from offensive strikes to post-mortem analysis:
+
+* **Imperative Strikes:** Bypasses YAML overhead for rapid testing via direct flags.
+* **SLA-Guarded Automation:** Wraps fault injections in active feedback loops, triggering **Atomic Rollbacks** if latency thresholds or HTTP 5xx errors are detected.
+* **Strategic Planning:** Includes a policy linter and blast radius forecaster to calculate a **Weighted Risk Score** before execution.
 
 ---
 

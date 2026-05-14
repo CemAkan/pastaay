@@ -134,4 +134,4 @@ The engine actively prevents self-corruption by scanning for structural anomalie
 
 **Error Aggregation & Atomic Rollbacks:**
 Instead of failing at the first error, the engine aggregates all violations using Go 1.20+ `errors.Join`. If a payload contains *any* structural error, the engine rejects the update entirely, logs the multi-error violation, sends a failure ACK, and seamlessly continues operating with the last known stable configuration.
----
+
