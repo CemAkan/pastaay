@@ -21,7 +21,7 @@ func InitProvider(ctx context.Context, endpoint string) (func(context.Context) e
 	if endpoint == "" {
 		return func(context.Context) error { return nil }, nil
 	}
-	
+
 	endpoint = strings.TrimPrefix(endpoint, "http://")
 	endpoint = strings.TrimPrefix(endpoint, "https://")
 	endpoint = strings.TrimSuffix(endpoint, "/")
@@ -37,7 +37,7 @@ func InitProvider(ctx context.Context, endpoint string) (func(context.Context) e
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName("pastaay-engine"),
-			semconv.ServiceVersion("1.8.0-stable"),
+			semconv.ServiceVersion("2.0.0-stable"),
 		),
 	)
 	if err != nil {
