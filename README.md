@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="assets/main_header.png" alt="Pastaay Logo">
+  <img src="docs/assets/main_header.png" alt="Pastaay Logo">
   <br>
-  <img src="assets/main_description.png" alt="Pastaay Description">
+  <img src="docs/assets/main_description.png" alt="Pastaay Description">
 </p>
 
 <p align="center">
@@ -19,6 +19,7 @@
 * **Resource Sabotage:** Simulate CPU starvation and memory leaks with guaranteed cleanup via the Amnesia Protocol.
 * **Distributed Tracing:** Zero-allocation OpenTelemetry (OTLP) integration for visualizing chaos events across microservices without goroutine leaks.
 * **Kinetic Control Plane:** Fleet-wide chaos orchestration via the **`pastaayctl`** CLI, featuring imperative strikes, SLA-guarded autopilot experiments, and real-time telemetry dashboards.
+* **Kubernetes Native (NEW):** Seamlessly manage chaos experiments via Custom Resource Definitions (`ChaosPolicy`). Fully compatible with GitOps workflows like ArgoCD and Flux via the Pastaay Operator.
 
 ---
 
@@ -27,7 +28,7 @@
 Pastaay is built to be reactive. The engine monitors configuration states via an **amnesia-proof filesystem watcher** and remote telemetry channels. It instantly transitions between stable, high-latency (Glitch), and disconnected (Void) states without dropping underlying connections or requiring service restarts.
 
 <p align="center">
-  <img src="assets/hot_reload_demo.gif" width="850" alt="Pastaay Hot-Reloading Demonstration">
+  <img src="docs/assets/hot_reload_demo.gif" width="850" alt="Pastaay Hot-Reloading Demonstration">
 </p>
 
 ---
@@ -52,7 +53,7 @@ Pastaay utilizes OpenTelemetry's `BatchSpanProcessor`. This means chaos spans ar
 Pastaay is built to survive high-throughput data streams. Our core evaluator guarantees **O(1)** policy lookups and **0 Bytes** of memory allocation per operation, ensuring your application never suffers from Garbage Collection (GC) spikes.
 
 <p align="center">
-  <img src="assets/benchmark.png" alt="Pastaay Zero Allocation Benchmark">
+  <img src="docs/assets/benchmark.png" alt="Pastaay Zero Allocation Benchmark">
 </p>
 
 ---
@@ -76,6 +77,7 @@ Dive deep into Pastaay's mechanics using our official documentation:
 * [Architecture & Engine](docs/architecture.md) - Understand how the Policy Engine achieves zero-latency lookups, and how we solved deep OS/Compiler integration constraints.
 * [Remote Control & Cloud-Native Sensors](docs/remote_control.md) - Learn how to securely control chaos across massive fleets via Redis, Kubernetes, or Webhooks.
 * [pastaayctl: Kinetic Control Plane Reference](docs/pastaayctl.md) - Master the CLI to orchestrate fleet-wide chaos, run SLA-guarded autopilot experiments, and monitor real-time kinetic impact.
+* [Pastaay Kubernetes Operator](docs/operator.md) - Learn how to deploy the operator and manage chaos natively using Kubernetes CRDs.
 
 ---
 ##  Installation
@@ -142,6 +144,16 @@ func main() {
 }
 ```
 
+### 3. Deploy the Operator (Optional, for Kubernetes environments):
+
+```bash
+# Register the CRD
+make -C operator install
+
+# Deploy the operator to your cluster
+make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.0.0
+```
+
 ---
 
 ## Running the Demos
@@ -192,6 +204,6 @@ Pastaay is open-sourced software licensed under the [MIT License](LICENSE).
 ---
 
 <p align="center">
-  <img src="assets/main_bottom.png" alt="Pastaay QR Code">
+  <img src="docs/assets/main_bottom.png" alt="Pastaay QR Code">
 </p>
 

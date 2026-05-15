@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/arch_header.png" alt="Architecture Header"/>
+  <img src="assets/arch_header.png" alt="Architecture Header"/>
 </p>
 
 Welcome to the engine room. This document outlines the core design decisions, memory management strategies, and deep OS/compiler integrations that allow the chaos engine to inject faults into high-throughput microservices without becoming a bottleneck.
@@ -12,10 +12,16 @@ Pastaay is engineered for **zero-allocation overhead**. The following diagram il
 
 ```mermaid
 graph LR
-%% External Control Plane
-    CTL["<b>pastaayctl</b><br/>(CLI Orchestrator)"]
+%% ==========================================
+%% 1. LEFT COLUMN: SOURCES (Control, Host, FS)
+%% ==========================================
+    subgraph CP ["CONTROL PLANE"]
+        direction TB
+        CTL["<b>pastaayctl</b><br/>(CLI Orchestrator)"]
+        OP["<b>Pastaay Operator</b><br/>(K8s CRD Controller)"]
+    end
 
-    subgraph HOST ["Host Application & Environment"]
+    subgraph HOST ["HOST ENVIRONMENT"]
         direction TB
         A["Kafka / RabbitMQ Consumer"]
         B["Database/SQL Client"]
@@ -24,23 +30,36 @@ graph LR
         H["<b>OS Resources (CPU/RAM)</b>"]
     end
 
+    subgraph FS ["FILE SYSTEM / LOCAL"]
+        direction TB
+        F1["pastaay.yaml"]
+        F2["Amnesia-Proof Watcher"]
+    end
+
+%% Invisible links to force vertical stacking on the left
+    OP ~~~ A
+    H ~~~ F1
+
+%% ==========================================
+%% 2. MIDDLE COLUMN: PASTAAY ENGINE
+%% ==========================================
     subgraph PE ["PASTAAY ENGINE"]
         direction TB
 
-        subgraph IL ["1. INTERCEPTOR LAYER (ZERO-ALLOCATION)"]
+        subgraph IL ["INTERCEPTOR LAYER (ZERO-ALLOCATION)"]
             direction TB
-            I1["Broker Middleware<br/>Extracts Metadata Only"]
+            I1["Broker Middleware<br/>(Metadata Extraction)"]
             I1 ~~~ I2
-            I2["SQL Driver Wrapper<br/>Fallback Evasion Shield"]
+            I2["SQL Driver Wrapper<br/>(Evasion Shield)"]
             I2 ~~~ I3
-            I3["NoSQL Monitor/Hook<br/>Command Interception"]
+            I3["NoSQL Monitor/Hook<br/>(Command Intercept)"]
             I3 ~~~ I4
-            I4["API Middleware<br/>Request & Context Control"]
+            I4["API Middleware<br/>(Webhook & Request)"]
             I4 ~~~ I5
             I5["<b>Resource Sabotage Trigger</b>"]
         end
 
-        subgraph CE ["2. CORE EVALUATOR & TRACING"]
+        subgraph CE ["CORE EVALUATOR & TRACING"]
             direction TB
             E1{"O(1) Policy Lookup"}
             subgraph CE_RES ["Resource Sabotage Units"]
@@ -58,52 +77,60 @@ graph LR
             E3 -.->|EndSpan| T1
         end
 
-        subgraph MC ["3. MEMORY & CONFIGURATION"]
+        subgraph MC ["MEMORY & CONFIGURATION"]
             direction TB
             M1[("(Config Manager)")]
             M2["atomic.Pointer[T]"]
         end
     end
 
-    subgraph FS ["FILE SYSTEM / REMOTE"]
-        direction TB
-        F1["pastaay.yaml"]
-        F2["Amnesia-Proof Watcher"]
-    end
-
+%% ==========================================
+%% 3. RIGHT COLUMN: OBSERVABILITY
+%% ==========================================
     subgraph OBS ["EXTERNAL OBSERVABILITY"]
         direction TB
         O1["Prometheus (Metrics)"]
         O2["Jaeger/Zipkin (Traces)"]
     end
 
-%% Application Flow
+%% ==========================================
+%% RELATIONSHIPS & ARROWS
+%% ==========================================
+
+%% Application Traffic to Interceptors
     A -.-> I1
     B -.-> I2
     C -.-> I3
     D -.-> I4
 
+%% Interceptors to Evaluator
     I1 & I2 & I3 & I4 --> E1
     I5 ==>|Intensity| E4
     I5 ==>|Chunk/Interval| E5
 
+%% Evaluator reads Memory
     E1 ==>|Reads| M1
 
+%% Sabotage to Host Resources
     E4 & E5 -.->|Sabotage| H
 
-%% Control Plane Connections
-    CTL == "HTTP/JSON Webhook" ==> I4
-    CTL == "Redis PubSub" ==> M1
+%% Control Plane to Engine (Clean Routing)
+    CTL == "Redis PubSub" ===> M1
+    CTL == "HTTP/JSON Webhook" ===> I4
+    OP == "K8s API -> Webhook" ===> I4
 
-%% Configuration & Metrics Flow
+%% File System to Memory
     F1 --> F2
     F2 --> M2
     M2 ==>|Updates| M1
 
+%% Telemetry to Observability
     T1 ===>|gRPC / OTLP| O2
     CE ===>|Metrics| O1
 
-%% Styling
+%% ==========================================
+%% STYLING
+%% ==========================================
     classDef interceptor fill:#f9f5d7,stroke:#b57614,stroke-width:2px,color:#3c3836;
     classDef evaluator fill:#d3e8e1,stroke:#076678,stroke-width:2px,color:#3c3836;
     classDef memory fill:#e2d3e8,stroke:#8f3f71,stroke-width:2px,color:#3c3836;
@@ -116,8 +143,7 @@ graph LR
     class M1,M2 memory;
     class F1,F2 filesystem;
     class O1,O2 observability;
-    class CTL control;
-
+    class CTL,OP control;
 ```
 
 ---
@@ -202,13 +228,19 @@ Pastaay features native, zero-allocation tracing via OpenTelemetry.
 
 ---
 
-## 6. The Control Plane (pastaayctl)
+## 6. The Control Plane (pastaayctl & Operator)
 
-Pastaay includes a senior-grade CLI designed to act as a centralized **Kinetic Control Plane**. It manages the lifecycle of chaos from offensive strikes to post-mortem analysis:
+Pastaay includes a senior-grade control plane designed to manage the lifecycle of chaos from offensive strikes to post-mortem analysis:
 
+### pastaayctl (CLI Orchestrator)
 * **Imperative Strikes:** Bypasses YAML overhead for rapid testing via direct flags.
 * **SLA-Guarded Automation:** Wraps fault injections in active feedback loops, triggering **Atomic Rollbacks** if latency thresholds or HTTP 5xx errors are detected.
 * **Strategic Planning:** Includes a policy linter and blast radius forecaster to calculate a **Weighted Risk Score** before execution.
+
+### Pastaay Kubernetes Operator (Cloud-Native Orchestrator)
+* **CRD Management:** Introduces the `ChaosPolicy` Custom Resource, allowing SREs to manage chaos rules natively via `kubectl`.
+* **GitOps Ready:** Fully compatible with ArgoCD and Flux. You can store your chaos policies in Git and let the Operator sync them directly into the Pastaay Engine's memory via authenticated webhooks.
+* **Autonomous Reconciliation:** Operates on a continuous reconciliation loop, ensuring the active chaos state exactly matches the declared state in your Kubernetes cluster.
 
 ---
 

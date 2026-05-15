@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/conf_header.png" alt="Configuration Header">
+  <img src="assets/conf_header.png" alt="Configuration Header">
 </p>
 
 The `pastaay.yaml` file is the heart of the chaos engine. The configuration supports global protection rules, granular targeting, and case-insensitive policy matching.
@@ -195,4 +195,32 @@ Pastaay supports cascading chaos rules. A single route can be targeted by multip
 Pastaay is heavily hardened against the "Linux File-Save Amnesia" bug. Standard editors (Vim, Nano) and deployment pipelines often delete the original file inode during a save operation, which breaks standard filesystem watchers.
 
 * **Recovery**: Pastaay natively traps `Rename/Remove` filesystem events.
-* **Re-attachment**: It engages an asynchronous retry loop to re-attach the `fsnotify` watcher to the new file inode instantly, ensuring zero configuration downtime during live incidents.
+* **Re-attachment**: It engages an asynchronous retry loop to re-attach the `fsnotify` watcher to the new file inode instantly, 
+
+---
+
+## Kubernetes Native Configuration (CRD)
+
+If you are using the **Pastaay Kubernetes Operator**, you do not need to manually distribute `pastaay.yaml` files. Instead, you can define your chaos vectors using the native `ChaosPolicy` Custom Resource Definition (CRD).
+
+The Operator automatically translates these CRDs into standard Pastaay JSON payloads and injects them into the Engine's webhook.
+
+### ChaosPolicy Example
+
+```yaml
+apiVersion: chaos.pastaay.io/v1
+kind: ChaosPolicy
+metadata:
+  name: cache-stampede-simulation
+  namespace: default
+spec:
+  type: redis
+  target: get
+  latencyChance: 0.8
+  latencyDuration: "2s"
+  errorChance: 0.1
+```
+
+### Spec Field Mapping
+
+The CRD `spec` fields map 1:1 with the standard `pastaay.yaml` properties, but they utilize Kubernetes-standard `camelCase` naming conventions instead of `snake_case` (e.g., `latency_chance` becomes `latencyChance`).

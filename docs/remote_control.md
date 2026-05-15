@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/remote_header.png" alt="Remote Control Header">
+  <img src="assets/remote_header.png" alt="Remote Control Header">
 </p>
 
 Pastaay is designed to operate in highly distributed, Tier-1 enterprise environments. Relying solely on local `pastaay.yaml` file modifications is fundamentally incompatible with ephemeral infrastructure and massive Kubernetes fleets.

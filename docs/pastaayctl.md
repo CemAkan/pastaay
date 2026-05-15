@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/cli_header.png" alt="CLI Header"/>
+  <img src="assets/cli_header.png" alt="CLI Header"/>
 </p>
 
 **pastaayctl** is the central orchestrating command-line interface for the Pastaay Chaos Engine ecosystem. Engineered for high-scale fleet management in distributed architectures, it provides a unified platform for imperative fault injection, SLA-guarded autonomous experimentation, and real-time kinetic observability.
