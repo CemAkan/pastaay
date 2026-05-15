@@ -36,13 +36,12 @@ func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Deliv
 			return "", false
 		},
 	}
+	
+	shouldDrop, delay, evalErr, latencyTag, errorTag := m.evaluator.Evaluate(ctx, msgCtx)
 
-	shouldDrop, delay, evalErr := m.evaluator.Evaluate(ctx, msgCtx)
-	metricTag := "rabbitmq:" + delivery.RoutingKey
-
-	if delay > 0 {
-		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
-		spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.latency", delivery.RoutingKey, "latency")
+	if delay > 0 && latencyTag != "" {
+		metrics.InjectedFaultsTotal.WithLabelValues(latencyTag, "latency").Inc()
+		spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.latency", latencyTag, "latency")
 
 		timer := time.NewTimer(delay)
 		select {
@@ -56,15 +55,15 @@ func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Deliv
 		}
 	}
 
-	if shouldDrop {
-		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "drop").Inc()
-		_, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.drop", delivery.RoutingKey, "drop")
+	if shouldDrop && errorTag != "" {
+		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "drop").Inc()
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.drop", errorTag, "drop")
 		span.End()
 		return true, nil
 	}
-	if evalErr != nil {
-		metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
-		_, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.error", delivery.RoutingKey, "error")
+	if evalErr != nil && errorTag != "" {
+		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "error").Inc()
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.error", errorTag, "error")
 		span.End()
 		return true, evalErr
 	}

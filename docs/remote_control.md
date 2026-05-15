@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/remote_header.png" alt="Remote Control Header">
+  <img src="assets/remote_header.png" alt="Remote Control Header">
 </p>
 
 Pastaay is designed to operate in highly distributed, Tier-1 enterprise environments. Relying solely on local `pastaay.yaml` file modifications is fundamentally incompatible with ephemeral infrastructure and massive Kubernetes fleets.
@@ -134,4 +134,4 @@ The engine actively prevents self-corruption by scanning for structural anomalie
 
 **Error Aggregation & Atomic Rollbacks:**
 Instead of failing at the first error, the engine aggregates all violations using Go 1.20+ `errors.Join`. If a payload contains *any* structural error, the engine rejects the update entirely, logs the multi-error violation, sends a failure ACK, and seamlessly continues operating with the last known stable configuration.
----
+

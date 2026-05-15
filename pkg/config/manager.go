@@ -43,7 +43,6 @@ func generateStableHash(p *Policy) uint64 {
 	var h uint64 = 14695981039346656037
 	sep := func() { h ^= 0; h *= 1099511628211 }
 
-	// Essential policy strings
 	for _, s := range []string{p.Name, p.Target, p.Type, p.ErrorBody, p.StreamRollMode} {
 		for i := 0; i < len(s); i++ {
 			h ^= uint64(s[i])
@@ -52,7 +51,6 @@ func generateStableHash(p *Policy) uint64 {
 		sep()
 	}
 
-	// Boolean state change must trigger re-roll
 	if p.DropConnection {
 		h ^= 1
 	} else {
@@ -60,7 +58,6 @@ func generateStableHash(p *Policy) uint64 {
 	}
 	h *= 1099511628211
 
-	// Numeric & Probability fields
 	h ^= uint64(p.ThrottleThreshold)
 	h *= 1099511628211
 	h ^= uint64(p.RAMChunkMB)
@@ -76,7 +73,6 @@ func generateStableHash(p *Policy) uint64 {
 	h ^= math.Float64bits(p.ErrorChance)
 	h *= 1099511628211
 
-	// Metadata headers
 	if len(p.MatchHeaders) > 0 {
 		keys := make([]string, 0, len(p.MatchHeaders))
 		for k := range p.MatchHeaders {
@@ -104,21 +100,42 @@ func (m *Manager) Update(newCfg *PastaayConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if newCfg != nil {
+
 		for i := range newCfg.Policies {
+
 			p := &newCfg.Policies[i]
+
+			tag := p.Type + ":" + p.Target
+			if len(tag) > 64 {
+				tag = tag[:61] + "..."
+			}
+			p.MetricTag = tag
+
+			// SQL Smart Boundary & Regex
 			if strings.EqualFold(p.Type, "sql") && !strings.EqualFold(p.Target, "ALL") && !strings.EqualFold(p.Target, "DATABASE") {
-				re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(strings.ToUpper(p.Target)) + `\b`)
+				targetPattern := p.Target
+
+				isAlphaNum := true
+				for _, char := range targetPattern {
+					if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_') {
+						isAlphaNum = false
+						break
+					}
+				}
+				if isAlphaNum {
+					targetPattern = `\b` + targetPattern + `\b`
+				}
+
+				re, err := regexp.Compile(`(?i)` + targetPattern)
 				if err == nil {
 					p.CompiledRegex = re
 				}
 			}
-			if strings.HasSuffix(p.Target, "*") {
-				p.IsWildcard = true
-				p.WildcardPrefix = strings.ToUpper(p.Target[:len(p.Target)-1])
-			}
+
 			p.PolicyHash = generateStableHash(p)
 		}
 		m.cfg.Store(newCfg)
+
 	}
 	cache := make(map[string][]Policy)
 	if newCfg != nil {
@@ -192,7 +209,9 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 	if cfg.EnableDefaultIgnored {
 		if list, ok := DefaultProtectedCommands[protocol]; ok {
 			for _, protected := range list {
-				if strings.HasPrefix(cleanCmd, strings.ToUpper(protected)) {
+
+				p := strings.TrimLeft(strings.ToUpper(protected), "/")
+				if strings.HasPrefix(cleanCmd, p) {
 					return true
 				}
 			}
@@ -201,7 +220,9 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 	if cfg.IgnoredCommands != nil {
 		if customList, ok := cfg.IgnoredCommands[protocol]; ok {
 			for _, custom := range customList {
-				if strings.HasPrefix(cleanCmd, strings.ToUpper(custom)) {
+
+				c := strings.TrimLeft(strings.ToUpper(custom), "/")
+				if strings.HasPrefix(cleanCmd, c) {
 					return true
 				}
 			}
@@ -217,4 +238,8 @@ func (m *Manager) IsCommandIgnored(protocol string, cmd string) bool {
 	cleanCmd := strings.ToUpper(strings.TrimSpace(cmd))
 	cleanCmd = strings.TrimLeft(cleanCmd, "/")
 	return m.IsCleanCommandIgnored(protocol, cleanCmd)
+}
+
+func (m *Manager) GetRawConfig() *PastaayConfig {
+	return m.cfg.Load()
 }

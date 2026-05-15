@@ -70,3 +70,22 @@ func writeJSONError(w http.ResponseWriter, code int, msg, details string) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(WebhookResponse{Status: "error", Message: msg, Details: details})
 }
+
+func ExportHandler(mgr *Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed", "")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/yaml")
+		cfg := mgr.GetRawConfig()
+
+		if cfg == nil {
+			w.Write([]byte("version: 1\npolicies: []\n"))
+			return
+		}
+
+		yaml.NewEncoder(w).Encode(cfg)
+	}
+}

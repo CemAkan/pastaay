@@ -27,7 +27,7 @@ func (c *ChaosDialer) DialContext(ctx context.Context, network, address string) 
 				chance = 1.0
 			}
 			if rand.Float64() < chance {
-				metrics.InjectedFaultsTotal.WithLabelValues("mongo:"+p.Target, "drop").Inc()
+				metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
 				return nil, errors.New("[Pastaay-Mongo] Chaos: connection forcefully dropped by policy")
 			}
 		}

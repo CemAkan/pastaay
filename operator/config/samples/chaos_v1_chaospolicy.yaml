@@ -1,0 +1,9 @@
+apiVersion: chaos.pastaay.io/v1
+kind: ChaosPolicy
+metadata:
+  name: k8s-db-attack
+spec:
+  type: sql
+  target: database
+  errorChance: 0.5
+  errorBody: "K8s Operator Injected Error"

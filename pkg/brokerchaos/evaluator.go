@@ -23,15 +23,17 @@ func NewEvaluator(provider ConfigProvider) Evaluator {
 	return &defaultEvaluator{provider: provider}
 }
 
-func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error) {
+func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error, string, string) {
 	if msgCtx == nil || e.provider.IsCommandIgnored(string(msgCtx.Protocol), msgCtx.Topic) {
-		return false, 0, nil
+		return false, 0, nil, "", ""
 	}
 
 	policies := e.provider.GetActivePolicies()
 	var delayDuration time.Duration
 	var shouldDrop bool
 	var chaosErr error
+	var latencyTag string
+	var errorTag string
 
 	for _, p := range policies {
 		if !strings.EqualFold(p.Type, string(msgCtx.Protocol)) {
@@ -60,9 +62,11 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 
 		if p.LatencyDuration > delayDuration && rand.Float64() < p.LatencyChance {
 			delayDuration = p.LatencyDuration
+			latencyTag = p.MetricTag
 		}
 
 		if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+			errorTag = p.MetricTag
 			if p.DropConnection {
 				shouldDrop = true
 			} else {
@@ -76,5 +80,5 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 		}
 	}
 
-	return shouldDrop, delayDuration, chaosErr
+	return shouldDrop, delayDuration, chaosErr, latencyTag, errorTag
 }

@@ -58,10 +58,11 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 				s.mu.Lock()
 				d, decided := s.decidedPolicies[p.Name]
 
-				// Detect hot-reload by comparing cached fingerprint hashes
 				if decided && d.Hash == p.PolicyHash {
 					s.mu.Unlock()
 					if d.Latency > 0 {
+
+						metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "latency").Inc()
 						spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.latency", s.method, "latency")
 						if err := waitContext(spanCtx, d.Latency); err != nil {
 							span.End()
@@ -70,6 +71,8 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 						span.End()
 					}
 					if d.Err != nil {
+
+						metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "error").Inc()
 						_, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.error", s.method, "error")
 						span.End()
 						return d.Err
@@ -77,7 +80,6 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 					continue
 				}
 
-				// Re-roll if policy is new or configuration changed
 				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 					decision.Latency = p.LatencyDuration
 				}
@@ -97,7 +99,8 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 				}
 			}
 
-			metricTag := "grpc:" + s.method
+			metricTag := p.MetricTag
+
 			if decision.Latency > 0 {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
 				spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.latency", s.method, "latency")
@@ -142,7 +145,8 @@ func matchMetadataPure(md metadata.MD, required map[string]string) bool {
 		for mdK, vals := range md {
 			if strings.EqualFold(mdK, reqK) {
 				for _, v := range vals {
-					if v == reqV {
+
+					if strings.EqualFold(v, reqV) {
 						found = true
 						break
 					}

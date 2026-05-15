@@ -20,5 +20,5 @@ type MessageContext struct {
 }
 
 type Evaluator interface {
-	Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error)
+	Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error, string, string)
 }
