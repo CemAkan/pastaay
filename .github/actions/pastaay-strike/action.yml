@@ -1,0 +1,45 @@
+name: 'Pastaay Chaos Strike'
+description: 'Execute SLA-guarded chaos experiments seamlessly in your CI/CD pipelines.'
+branding:
+  icon: 'zap'
+  color: 'red'
+
+inputs:
+  policy_file:
+    description: 'Path to the Pastaay YAML policy file (e.g., ./chaos/db-kill.yaml)'
+    required: true
+  engine_url:
+    description: 'URL of the target Pastaay Engine (e.g., http://staging-api:2112/chaos/webhook)'
+    required: true
+  health_url:
+    description: 'Health check URL to monitor SLAs during the strike'
+    required: true
+  duration:
+    description: 'Total duration of the chaos experiment'
+    default: '30s'
+  max_latency:
+    description: 'Maximum allowed latency before triggering an SLA breach and failing the pipeline'
+    default: '500ms'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Install pastaayctl
+      shell: bash
+      # Fetches the latest stable version directly from your repository
+      run: go install github.com/CemAkan/pastaay/cmd/pastaayctl@latest
+
+    - name: Execute Chaos Experiment
+      shell: bash
+      # Runs the automated experiment. If SLA breaches, it exits with code 1, breaking the CI/CD build safely.
+      run: |
+        pastaayctl run ${{ inputs.policy_file }} \
+          --target ${{ inputs.engine_url }} \
+          --health-url ${{ inputs.health_url }} \
+          --duration ${{ inputs.duration }} \
+          --max-latency ${{ inputs.max_latency }}
