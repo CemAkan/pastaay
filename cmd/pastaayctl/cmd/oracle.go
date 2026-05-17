@@ -16,14 +16,16 @@ import (
 )
 
 var (
-	aiProvider string
-	aiKey      string
+	aiProvider      string
+	aiKey           string
+	oracleHealthURL string
 )
 
 const systemPrompt = `You are Pastaay Oracle, an elite Site Reliability Engineering (SRE) and Chaos Engineering AI. 
 Your goal is to analyze the user's distributed system topology, current metric throughput, and active chaos policies. 
 You must identify weak points, suggest optimal "blast radius" configurations, and generate highly targeted Pastaay YAML configurations.
-Never suggest random guesses; always base your decisions on the provided telemetry data. Be concise, technical, and output YAML in markdown blocks.`
+Never suggest random guesses; always base your decisions on the telemetry data. Be concise. Output YAML in markdown blocks.
+CRITICAL: Always remind the operator that they can instantly abort the experiment by running 'pastaayctl rollback'.`
 
 var oracleCmd = &cobra.Command{
 	Use:   "oracle [prompt]",
@@ -37,6 +39,7 @@ func init() {
 	rootCmd.AddCommand(oracleCmd)
 	oracleCmd.Flags().StringVar(&aiProvider, "provider", "openai", "AI Provider format to use (openai is standard for GPT/Grok/Local)")
 	oracleCmd.Flags().StringVar(&aiKey, "api-key", "", "API Key for the provider (falls back to PASTAAY_AI_KEY env var)")
+	oracleCmd.Flags().StringVar(&oracleHealthURL, "health-url", "", "Custom health check URL for baseline latency calculation")
 }
 
 func runOracle(cmd *cobra.Command, args []string) {
@@ -149,7 +152,11 @@ func gatherSystemContext(ctx context.Context) string {
 
 	// Establish Baseline Latency (Health Probe)
 	sb.WriteString("\nCURRENT BASELINE HEALTH:\n")
-	healthURL := strings.Replace(targetURL, ":2112/metrics", ":8080/api/v1/ping", 1)
+
+	healthURL := oracleHealthURL
+	if healthURL == "" {
+		healthURL = strings.Replace(targetURL, ":2112/metrics", ":8080/api/v1/ping", 1)
+	}
 
 	start := time.Now()
 	healthReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
