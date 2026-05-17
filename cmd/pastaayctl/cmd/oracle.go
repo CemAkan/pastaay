@@ -61,7 +61,6 @@ func runOracle(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("  %s[*] Establishing neural link with AI backend...%s\n", cGray, cReset)
 
-	// Combine user prompt with live system reality
 	finalPrompt := fmt.Sprintf("User Request: %s\n\n--- LIVE SYSTEM CONTEXT ---\n%s", userPrompt, sysContext)
 
 	response, err := callOpenAIFormat(apiKey, systemPrompt, finalPrompt)
@@ -72,9 +71,24 @@ func runOracle(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("\n%s═══ ORACLE ANALYSIS ═══%s\n", cBold+cPurple, cReset)
 	fmt.Println(response)
+
+	yamlBlock := extractYAML(response)
+	if yamlBlock != "" {
+		fmt.Printf("\n%s[?] Oracle has generated a Chaos Policy. Would you like to inject it into the fleet now? (y/N): %s", cYellow, cReset)
+		reader := bufio.NewReader(os.Stdin)
+		choice, _ := reader.ReadString('\n')
+		choice = strings.TrimSpace(strings.ToLower(choice))
+
+		if choice == "y" || choice == "yes" {
+			fmt.Printf("  %s[*] Discarding safety protocols. Injecting Oracle payload...%s\n", cGray, cReset)
+			// Reuses the existing dispatch function from attack.go!
+			dispatch([]byte(yamlBlock))
+		} else {
+			fmt.Printf("  %s[*] Injection aborted by operator.%s\n", cGray, cReset)
+		}
+	}
 }
 
-// gatherSystemContext pulls live YAML and topology data from the Pastaay Engine
 func gatherSystemContext(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("ACTIVE POLICIES:\n")
@@ -105,17 +119,16 @@ func gatherSystemContext(ctx context.Context) string {
 	return sb.String()
 }
 
-// callOpenAIFormat uses the standard OpenAI REST schema (compatible with many providers)
 func callOpenAIFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
 	url := "https://api.openai.com/v1/chat/completions"
 
 	payload := map[string]interface{}{
-		"model": "gpt-4-turbo-preview", // Or any equivalent model
+		"model": "gpt-4-turbo-preview",
 		"messages": []map[string]string{
 			{"role": "system", "content": sysPrompt},
 			{"role": "user", "content": userPrompt},
 		},
-		"temperature": 0.3, // Low temperature for SRE predictability
+		"temperature": 0.3,
 	}
 
 	jsonData, _ := json.Marshal(payload)
@@ -150,4 +163,21 @@ func callOpenAIFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
 		return result.Choices[0].Message.Content, nil
 	}
 	return "", fmt.Errorf("empty response from AI")
+}
+
+// extractYAML sifts through the AI's markdown response to find the raw YAML block
+func extractYAML(response string) string {
+	start := strings.Index(response, "```yaml")
+	if start == -1 {
+		return ""
+	}
+	start += 7 // Move past "```yaml"
+
+	// Find the closing backticks after the yaml declaration
+	end := strings.Index(response[start:], "```")
+	if end == -1 {
+		return ""
+	}
+
+	return strings.TrimSpace(response[start : start+end])
 }
