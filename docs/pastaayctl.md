@@ -100,23 +100,43 @@ Pastaay includes a native, zero-dependency Multi-LLM client that acts as an auto
 | --- | --- | --- | --- |
 | **oracle** | Gemini, OpenAI, Anthropic | Auto-Apply Injection | Analyzes live system stress and generates targeted YAML policies. Includes an interactive prompt to instantly inject the AI-generated payload into the fleet. |
 
+**Supported Providers & Default Models:**
+* `--provider openai` (Defaults to `gpt-4o-mini`)
+* `--provider gemini` (Defaults to `gemini-2.5-flash`)
+* `--provider anthropic` (Defaults to `claude-3-5-sonnet-latest`)
+
+*You can dynamically override the default models using the `-m` or `--model` flag.*
+
+<p align="center">
+  <img src="assets/suppotred_ais.png" alt="Suppotred AIs Banner"/>
+</p>
+
+<br>
+
 **Usage Example:**
 ```bash
 # Export your API key
 export PASTAAY_AI_KEY="your-api-key"
 
-# Ask Oracle to design and optionally inject a specific chaos scenario via Gemini
-pastaayctl oracle "We need to test the database pool limits. Give me a 30s latency config." --provider gemini --health-url http://api.mycompany.com/health
+# Ask Oracle to design a scenario using Gemini (Default model)
+pastaayctl oracle "We need to test the database pool limits. Give me a 30s latency config." --provider gemini --health-url [http://api.mycompany.com/health](http://api.mycompany.com/health)
+
+# Override the model to use OpenAI's flagship GPT-4o
+pastaayctl oracle "Simulate a cache stampede on Redis" --provider openai -m gpt-4o
+
 ```
 
 **Interactive Output Example:**
+
 ```text
 [#] WAKING PASTAAY ORACLE...
+  [*] "We're pushing the boundaries of all that is real and possible. We're not roasting a turkey."
   [*] Scanning fleet topology and active kinetic state...
   [*] Establishing neural link with AI backend...
 
 ═══ ORACLE ANALYSIS ═══
 Based on your current baseline latency of 45ms and 0 active faults on the SQL layer, here is the optimal blast radius to test connection pooling without triggering a total outage:
+
 ```
 
 ```yaml
@@ -127,14 +147,18 @@ policies:
     target: database
     latency_chance: 0.6
     latency_duration: 30s
+
 ```
 
-*Note: You can instantly abort this experiment at any time by running `pastaayctl rollback`.*
+<br>
+
+*⚠ Note: You can instantly abort this experiment at any time by running `pastaayctl rollback`.*
 
 ```text
 [?] Oracle has generated a Chaos Policy. Would you like to inject it into the fleet now? (y/N): y
   [*] Discarding safety protocols. Injecting Oracle payload...
 [+] PAYLOAD DELIVERED SUCCESSFULLY
+
 ```
 
 ---

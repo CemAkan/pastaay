@@ -19,6 +19,7 @@ var (
 	aiProvider      string
 	aiKey           string
 	oracleHealthURL string
+	aiModel         string
 )
 
 const systemPrompt = `You are Pastaay Oracle, an elite Site Reliability Engineering (SRE) and Chaos Engineering AI. 
@@ -40,6 +41,7 @@ func init() {
 	oracleCmd.Flags().StringVar(&aiProvider, "provider", "openai", "AI Provider format to use (openai is standard for GPT/Grok/Local)")
 	oracleCmd.Flags().StringVar(&aiKey, "api-key", "", "API Key for the provider (falls back to PASTAAY_AI_KEY env var)")
 	oracleCmd.Flags().StringVar(&oracleHealthURL, "health-url", "", "Custom health check URL for baseline latency calculation")
+	oracleCmd.Flags().StringVarP(&aiModel, "model", "m", "", "Specific AI model to use (falls back to provider default)")
 }
 
 func runOracle(cmd *cobra.Command, args []string) {
@@ -68,18 +70,29 @@ func runOracle(cmd *cobra.Command, args []string) {
 
 	finalPrompt := fmt.Sprintf("User Request: %s\n\n--- LIVE SYSTEM CONTEXT ---\n%s", userPrompt, sysContext)
 
+	modelToUse := aiModel
+
 	var response string
 	var err error
 
 	switch strings.ToLower(aiProvider) {
 	case "openai":
-		response, err = callOpenAIFormat(apiKey, systemPrompt, finalPrompt)
+		if modelToUse == "" {
+			modelToUse = "gpt-4o-mini"
+		} // Default OpenAI
+		response, err = callOpenAIFormat(apiKey, systemPrompt, finalPrompt, modelToUse)
 	case "gemini":
-		response, err = callGeminiFormat(apiKey, systemPrompt, finalPrompt)
+		if modelToUse == "" {
+			modelToUse = "gemini-2.5-flash"
+		} // Default Gemini
+		response, err = callGeminiFormat(apiKey, systemPrompt, finalPrompt, modelToUse)
 	case "anthropic":
-		response, err = callAnthropicFormat(apiKey, systemPrompt, finalPrompt)
+		if modelToUse == "" {
+			modelToUse = "claude-sonnet-4-6"
+		}
+		response, err = callAnthropicFormat(apiKey, systemPrompt, finalPrompt, modelToUse)
 	default:
-		fmt.Printf("\n%s[!] Unknown Provider: %s. Supported: openai, gemini, anthropic%s\n", cRed, aiProvider, cReset)
+		fmt.Printf("\n%s[!] Unknown Provider...%s\n", cRed, cReset)
 		os.Exit(1)
 	}
 
@@ -174,11 +187,11 @@ func gatherSystemContext(ctx context.Context) string {
 	return sb.String()
 }
 
-func callOpenAIFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
+func callOpenAIFormat(apiKey, sysPrompt, userPrompt, model string) (string, error) {
 	url := "https://api.openai.com/v1/chat/completions"
 
 	payload := map[string]interface{}{
-		"model": "gpt-4-turbo-preview",
+		"model": model,
 		"messages": []map[string]string{
 			{"role": "system", "content": sysPrompt},
 			{"role": "user", "content": userPrompt},
@@ -238,9 +251,9 @@ func extractYAML(response string) string {
 }
 
 // callGeminiFormat integrates with Google's Gemini API (Google AI Studio)
-func callGeminiFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
-	// Note: Gemini puts the key in the URL query parameters
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" + apiKey
+func callGeminiFormat(apiKey, sysPrompt, userPrompt, model string) (string, error) {
+
+	url := "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey
 
 	// Gemini combines system prompt into the main request for standard REST
 	combinedPrompt := fmt.Sprintf("SYSTEM INSTRUCTIONS:\n%s\n\nUSER REQUEST:\n%s", sysPrompt, userPrompt)
@@ -294,21 +307,22 @@ func callGeminiFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
 }
 
 // callAnthropicFormat integrates with Anthropic's Claude Messages API
-func callAnthropicFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
+func callAnthropicFormat(apiKey, sysPrompt, userPrompt, model string) (string, error) {
 	url := "https://api.anthropic.com/v1/messages"
 
 	payload := map[string]interface{}{
-		"model":      "claude-3-opus-20240229",
+		"model":      model,
 		"max_tokens": 1024,
 		"system":     sysPrompt,
 		"messages": []map[string]string{
 			{"role": "user", "content": userPrompt},
 		},
-		"temperature": 0.3,
+		"temperature": 1.0,
 	}
 
 	jsonData, _ := json.Marshal(payload)
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("Content-Type", "application/json")
