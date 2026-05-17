@@ -28,8 +28,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+const chaosPolicyFinalizer = "chaos.pastaay.io/finalizer"
 
 type ChaosPolicyReconciler struct {
 	client.Client
@@ -43,17 +46,50 @@ type ChaosPolicyReconciler struct {
 func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
 
+	// Fetch active policy from Cluster
 	var policy chaosv1.ChaosPolicy
 	if err := r.Get(ctx, req.NamespacedName, &policy); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 1. Check if the policy has already finished its lifecycle
+	if policy.GetDeletionTimestamp() != nil {
+		if controllerutil.ContainsFinalizer(&policy, chaosPolicyFinalizer) {
+			l.Info("ChaosPolicy deletion detected. Cleaning Engine memory...", "policy", policy.Name)
+
+			rollbackPayload := map[string]interface{}{
+				"version":  1,
+				"policies": []interface{}{},
+			}
+			payloadBytes, _ := json.Marshal(rollbackPayload)
+			resp, err := http.Post(r.EngineURL, "application/json", bytes.NewBuffer(payloadBytes))
+			if err != nil {
+				l.Error(err, "Failed to send deletion cleanup to Engine, retrying...", "url", r.EngineURL)
+				return ctrl.Result{}, err
+			}
+			resp.Body.Close()
+
+			controllerutil.RemoveFinalizer(&policy, chaosPolicyFinalizer)
+			if err := r.Update(ctx, &policy); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if !controllerutil.ContainsFinalizer(&policy, chaosPolicyFinalizer) {
+		controllerutil.AddFinalizer(&policy, chaosPolicyFinalizer)
+		if err := r.Update(ctx, &policy); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Check if the policy has already finished its lifecycle
 	if policy.Status.Phase == "Expired" {
 		return ctrl.Result{}, nil
 	}
 
-	// 2. Parse the duration if provided
+	// Parse the duration if provided
 	var experimentDuration time.Duration
 	if policy.Spec.Duration != "" {
 		d, err := time.ParseDuration(policy.Spec.Duration)
@@ -64,14 +100,13 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// 3. Autonomous Rollback Logic (If time has passed)
+	// Autonomous Rollback Logic (If time has passed naturally)
 	if experimentDuration > 0 && policy.Status.LastAppliedTime != nil {
 		expirationTime := policy.Status.LastAppliedTime.Time.Add(experimentDuration)
 
 		if time.Now().After(expirationTime) {
 			l.Info("Chaos duration expired. Initiating autonomous rollback.", "policy", policy.Name)
 
-			// Rollback Payload: Empty policies list resets the Engine
 			rollbackPayload := map[string]interface{}{
 				"version":  1,
 				"policies": []interface{}{},
@@ -93,7 +128,7 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// 4. Standard Chaos Injection
+	// Standard Chaos Injection Pipeline
 	l.Info("Reconciling ChaosPolicy", "name", policy.Name, "type", policy.Spec.Type)
 	wrappedPayload := map[string]interface{}{
 		"version":  1,
@@ -117,7 +152,7 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: time.Second * 30}, nil
 	}
 
-	// 5. Update Status & Schedule Rollback Requeue
+	// Update Status & Schedule Rollback Requeue
 	if policy.Status.Phase != "Applied" {
 		policy.Status.Phase = "Applied"
 		now := metav1.Now()

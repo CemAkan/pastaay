@@ -2,7 +2,7 @@
   <img src="assets/conf_header.png" alt="Configuration Header">
 </p>
 
-The `pastaay.yaml` file is the heart of the chaos engine. The configuration supports global protection rules, granular targeting, and case-insensitive policy matching.
+The `pastaay.yaml` file is the heart of the chaos engine. The configuration supports global protection rules, granular targeting, dual-casing normalization guards, and case-insensitive policy matching.
 
 ## Global Settings
 
@@ -14,6 +14,7 @@ These settings govern the overall behavior of the Pastaay engine and protect you
 | `warmup_duration` | `string` | No | Time to wait after boot before injecting any chaos (e.g., `"10s"`). Prevents crash-loops during container initialization. |
 | `enable_default_ignored` | `bool` | No | Automatically bypasses chaos for critical setup DDLs (e.g., `CREATE`, `DROP`, `createIndexes`). |
 | `ignored_commands` | `map` | No | Custom map of protocols and commands to explicitly protect from fault injection. |
+
 
 ---
 
@@ -59,31 +60,31 @@ ignored_commands:
     - "AUTH"
   kafka:
     - "heartbeat"     # Protects consumer group stability
-
 ```
 
 ---
 
-## Policy Structure
+## Policy Structure & Unified Schema Matrix
 
-Each policy in the `policies` list supports the following fields to precisely target and execute chaos vectors:
+Each policy supports dual-casing fields to maintain full compatibility across local filesystem configurations and native Kubernetes resources. The custom unmarshaler automatically maps incoming fields seamlessly based on the runtime context.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | `string` | No | A unique identifier for the policy (highly recommended for telemetry tracking). |
-| `type` | `string` | **Yes** | Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`, `kafka`, `rabbitmq`, `resource`. |
-| `target` | `string` | **Yes** | Endpoint, route, or specific query to target. **Strictly Case-Insensitive.** |
-| `latency_chance` | `float` | No | Probability (`0.0` to `1.0`) of injecting a latency delay. |
-| `latency_duration` | `string` | No | **Protocols:** Request delay duration (e.g., `"500ms"`). <br> **Resource:** Total attack duration before Amnesia cleanup (e.g., `"15s"`). |
-| `error_chance` | `float` | No | Probability (`0.0` to `1.0`) of injecting a synthetic error/fault. |
-| `error_code` | `int` | No | Custom HTTP/gRPC Status Code *(type: http/grpc only)*. |
-| `error_body` | `string` | No | Custom response payload or error message string. |
-| `drop_connection` | `bool` | No | Forcefully rejects the TCP dial connection. **Safeguard: Requires `target: "all"` or `"database"` to execute.** |
-| `match_headers` | `map` | No | Key-value pairs for Blast Radius Control (e.g., targeting specific user agents or tokens). |
-| `throttle_threshold` | `int` | No | CPU intensity (SHA-256 hashes per context loop). Default: `100,000`. |
-| `ram_chunk_mb` | `int` | No | Physical RAM allocation size per interval (MB). |
-| `ram_interval` | `string` | No | Frequency of memory page allocation (e.g., `"1s"`). |
-| `stream_roll_mode` | `string` | No | gRPC only. Dictates RNG evaluation frequency (`stream` or `message`). Default: `stream`. |
+| Local Config Key (`snake_case`) | K8s Operator Key (`camelCase`) | Data Type | Required | Operational Field Description |
+| --- | --- | --- | --- | --- |
+| `name` | `name` | `string` | No | A unique identifier for the policy used for metric label isolation and telemetry tracking. |
+| `type` | `type` | `string` | **Yes** | Targeting protocol stack. Supported values: `http`, `sql`, `grpc`, `redis`, `mongo`, `kafka`, `rabbitmq`, `resource`. |
+| `target` | `target` | `string` | **Yes** | Endpoint, route, topic, or specific query pattern to target. Strictly case-insensitive. |
+| `latency_chance` | `latencyChance` | `float64` | No | Activation probability (0.0 to 1.0) for injecting latency delays. |
+| `latency_duration` | `latencyDuration` | `string` | No | **Protocols:** Request delay duration (e.g., `"500ms"`). <br><br> **Resource:** Total attack execution window before automatic Amnesia cleanup (e.g., `"15s"`). |
+| `error_chance` | `errorChance` | `float64` | No | Activation probability (0.0 to 1.0) for injecting synthetic faults or errors. |
+| `error_code` | `errorCode` | `int` | No | Custom status code. **Applies to type: `http` (100-599) or `grpc` (0-16) only.** |
+| `error_body` | `errorBody` | `string` | No | Payload diagnostic message or error string returned downstream during active faults. |
+| `drop_connection` | `dropConnection` | `bool` | No | Forcefully severs or rejects the underlying TCP connection. **Safeguard: Requires target `"all"` or `"database"` to execute.** |
+| `match_headers` | `matchHeaders` | `map` | No | Key-value mapping for fine-grained application context filtering (e.g., targeting specific User-Agents or tokens). |
+| `throttle_threshold` | `throttleThreshold` | `int` | No | CPU intensity limit (SHA-256 rounds per context loop). Defaults to `100,000`. |
+| `ram_chunk_mb` | `ramChunkMB` | `int` | No | Physical allocation block size (MB) for forcing host memory page-forcing. |
+| `ram_interval` | `ramInterval` | `string` | No | Wait interval frequency between sequential physical memory allocations (e.g., `"1s"`). |
+| `stream_roll_mode` | `streamRollMode` | `string` | No | gRPC streaming RNG evaluation scope logic. Accepts: `"stream"` (once at handshake) or `"message"` (per frame). Defaults to `"stream"`. |
+| N/A | `duration` | `string` | No | **Operator specific.** Total timeout before triggering an autonomous zero-state cluster rollback (Dead man's switch). |
 
 ---
 
@@ -93,11 +94,11 @@ Pastaay maintains absolute stability by enforcing structural rules upon payload 
 
 | Logic | Rule | Reason for Rejection |
 | --- | --- | --- |
-| **Probability** | `0.0 <= chance <= 1.0` | Strict adherence to probability theory constraints. |
-| **Duration** | `duration >= 0` | Negative time deltas induce system clock instability and goroutine deadlocks. |
-| **Resources** | `mb >= 0`, `intensity >= 0` | Negative resource allocation is logically impossible and triggers memory panics. |
-| **HTTP Spec** | `100 <= code <= 599` | Codes outside this range break standard HTTP clients and ingress controllers. |
-| **gRPC Spec** | `0 <= code <= 16` | Codes must follow the official Google gRPC status specification. |
+| **Probability** | 0.0 <= chance <= 1.0 | Strict adherence to probability theory constraints. |
+| **Duration** | duration >= 0 | Negative time deltas induce system clock instability and goroutine deadlocks. |
+| **Resources** | mb >= 0, intensity >= 0 | Negative resource allocation is logically impossible and triggers memory panics. |
+| **HTTP Spec** | 100 <= code <= 599 | Codes outside this range break standard HTTP clients and ingress controllers. |
+| **gRPC Spec** | 0 <= code <= 16 | Codes must follow the official Google gRPC status specification. |
 | **SQL Regex** | Must be valid Regex | Invalid regex strings prevent query matching and fail compilation. |
 
 > **Note:** The engine follows the **Unrestricted Chaos** philosophy. There are no upper limits on duration or memory thresholds. If configured to execute extreme values, the engine will proceed. Ensure payloads are planned accordingly.
@@ -198,32 +199,48 @@ Pastaay is heavily hardened against the "Linux File-Save Amnesia" bug. Standard 
 
 ---
 
-## Kubernetes Native Configuration (CRD)
+## Kubernetes Native Configuration (CRD) & Reference Models
 
-If you are using the **Pastaay Kubernetes Operator**, you do not need to manually distribute `pastaay.yaml` files. Instead, you can define your chaos vectors using the native `ChaosPolicy` Custom Resource Definition (CRD).
+When working across multi-tenant clusters or automated GitOps orchestration pipelines, SRE agents can supply topologies using either specification layer format interchangeably:
 
-The Operator automatically translates these CRDs into standard Pastaay JSON payloads and injects them into the Engine's webhook.
+### Blueprint A: Local Standalone Configuration (`pastaay.yaml`)
 
-### ChaosPolicy Example
+```yaml
+version: 1
+policies:
+  - name: "redis-cache-jitter"
+    type: "redis"
+    target: "get"
+    latency_chance: 0.5
+    latency_duration: "200ms"
+    drop_connection: false
+
+```
+
+### Blueprint B: Cloud-Native Custom Resource Manifest (`ChaosPolicy` CRD)
 
 ```yaml
 apiVersion: chaos.pastaay.io/v1
 kind: ChaosPolicy
 metadata:
-  name: cache-stampede-simulation
-  namespace: default
+  name: redis-cache-jitter
 spec:
-  type: redis
-  target: get
-  latencyChance: 0.8
-  latencyDuration: "2s"
-  errorChance: 0.1
+  type: "redis"
+  target: "get"
+  latencyChance: 0.5
+  latencyDuration: "200ms"
+  dropConnection: false
+
 ```
 
+---
+
 ### Spec Field Mapping
+
 The CRD `spec` fields map 1:1 with the standard `pastaay.yaml` properties, but they utilize Kubernetes-standard `camelCase` naming conventions instead of `snake_case` (e.g., `latency_chance` becomes `latencyChance`).
 
 **Operator-Specific Fields:**
+
 * `duration`: *(String, Optional)* Exclusive to the Kubernetes Operator. Defines the total time the chaos experiment should run (e.g., `"45s"`, `"2m"`). Once this duration expires, the Operator autonomously triggers a rollback, reverting the cluster to a stable state. Acts as a native Dead Man's Switch.
 
 <br>
