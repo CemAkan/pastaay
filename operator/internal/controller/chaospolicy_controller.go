@@ -48,8 +48,53 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	l.Info("Reconciling ChaosPolicy", "name", policy.Name, "type", policy.Spec.Type)
+	// 1. Check if the policy has already finished its lifecycle
+	if policy.Status.Phase == "Expired" {
+		return ctrl.Result{}, nil
+	}
 
+	// 2. Parse the duration if provided
+	var experimentDuration time.Duration
+	if policy.Spec.Duration != "" {
+		d, err := time.ParseDuration(policy.Spec.Duration)
+		if err == nil {
+			experimentDuration = d
+		} else {
+			l.Error(err, "Invalid duration format. Running indefinitely.")
+		}
+	}
+
+	// 3. Autonomous Rollback Logic (If time has passed)
+	if experimentDuration > 0 && policy.Status.LastAppliedTime != nil {
+		expirationTime := policy.Status.LastAppliedTime.Time.Add(experimentDuration)
+
+		if time.Now().After(expirationTime) {
+			l.Info("Chaos duration expired. Initiating autonomous rollback.", "policy", policy.Name)
+
+			// Rollback Payload: Empty policies list resets the Engine
+			rollbackPayload := map[string]interface{}{
+				"version":  1,
+				"policies": []interface{}{},
+			}
+
+			payloadBytes, _ := json.Marshal(rollbackPayload)
+			resp, err := http.Post(r.EngineURL, "application/json", bytes.NewBuffer(payloadBytes))
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			defer resp.Body.Close()
+
+			// Update Status to Expired
+			policy.Status.Phase = "Expired"
+			if err := r.Status().Update(ctx, &policy); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// 4. Standard Chaos Injection
+	l.Info("Reconciling ChaosPolicy", "name", policy.Name, "type", policy.Spec.Type)
 	wrappedPayload := map[string]interface{}{
 		"version":  1,
 		"policies": []interface{}{policy.Spec},
@@ -72,14 +117,25 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: time.Second * 30}, nil
 	}
 
-	policy.Status.Phase = "Applied"
-	now := metav1.Now()
-	policy.Status.LastAppliedTime = &now
-	if err := r.Status().Update(ctx, &policy); err != nil {
-		return ctrl.Result{}, err
+	// 5. Update Status & Schedule Rollback Requeue
+	if policy.Status.Phase != "Applied" {
+		policy.Status.Phase = "Applied"
+		now := metav1.Now()
+		policy.Status.LastAppliedTime = &now
+		if err := r.Status().Update(ctx, &policy); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
-	l.Info("Successfully pushed to engine", "policy", policy.Name)
+	// If there is a duration, wake the controller exactly when it expires
+	if experimentDuration > 0 && policy.Status.LastAppliedTime != nil {
+		timeLeft := policy.Status.LastAppliedTime.Time.Add(experimentDuration).Sub(time.Now())
+		if timeLeft > 0 {
+			l.Info("Scheduling autonomous rollback", "requeue_after", timeLeft)
+			return ctrl.Result{RequeueAfter: timeLeft}, nil
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 
