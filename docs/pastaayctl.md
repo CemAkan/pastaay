@@ -88,6 +88,55 @@ Auxiliary tools for configuration management, audit trails, and policy generatio
 | **Post-Mortem** | Reporting | Markdown Output | Generates a professional incident review report from the most recent chaos event. |
 | **Utility** | Generation | Stdout | Produces blueprints for common scenarios such as `db-outage` or `cache-stampede`. |
 
+### 6. Oracle
+
+<p align="center">
+  <img src="assets/oracle_banner.gif" alt="Oracle Banner"/>
+</p>
+
+Pastaay includes a native, zero-dependency Multi-LLM client that acts as an autonomous Site Reliability Engineer. The Oracle command connects to your active engine, reads live `/metrics` (kinetic impact) and health baseline latency, and passes this context to an AI provider.
+
+| Command | Provider Engine | Key Feature | Purpose |
+| --- | --- | --- | --- |
+| **oracle** | Gemini, OpenAI, Anthropic | Auto-Apply Injection | Analyzes live system stress and generates targeted YAML policies. Includes an interactive prompt to instantly inject the AI-generated payload into the fleet. |
+
+**Usage Example:**
+```bash
+# Export your API key
+export PASTAAY_AI_KEY="your-api-key"
+
+# Ask Oracle to design and optionally inject a specific chaos scenario via Gemini
+pastaayctl oracle "We need to test the database pool limits. Give me a 30s latency config." --provider gemini --health-url http://api.mycompany.com/health
+```
+
+**Interactive Output Example:**
+```text
+[#] WAKING PASTAAY ORACLE...
+  [*] Scanning fleet topology and active kinetic state...
+  [*] Establishing neural link with AI backend...
+
+═══ ORACLE ANALYSIS ═══
+Based on your current baseline latency of 45ms and 0 active faults on the SQL layer, here is the optimal blast radius to test connection pooling without triggering a total outage:
+```
+
+```yaml
+version: 1
+policies:
+  - name: oracle-db-pool-stress
+    type: sql
+    target: database
+    latency_chance: 0.6
+    latency_duration: 30s
+```
+
+*Note: You can instantly abort this experiment at any time by running `pastaayctl rollback`.*
+
+```text
+[?] Oracle has generated a Chaos Policy. Would you like to inject it into the fleet now? (y/N): y
+  [*] Discarding safety protocols. Injecting Oracle payload...
+[+] PAYLOAD DELIVERED SUCCESSFULLY
+```
+
 ---
 
 ## Operational Reliability Guards
@@ -97,3 +146,9 @@ Auxiliary tools for configuration management, audit trails, and policy generatio
 * **Metric Cardinality Guard:** To protect Prometheus RAM, the CLI respects the engine's 64-character truncation logic for high-entropy metric labels.
 * **Memory-Bounded Streams:** All configuration transfers implement `io.LimitReader` (1MB for Webhooks, 5MB for K8s) to mitigate OOM attack vectors against the control plane.
 * **Robust Telemetry ACKs:** Commands dispatched via Redis utilize `context.WithoutCancel` to guarantee that "Applied" acknowledgment signals reach the control plane even during unexpected terminal shutdown.
+
+<br>
+
+<p align="center">
+  <img src="assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+</p>
