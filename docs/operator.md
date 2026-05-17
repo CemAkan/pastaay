@@ -27,6 +27,7 @@ sequenceDiagram
     Op->>Engine: POST /chaos/webhook (Wrapped JSON Payload)
     Engine-->>Op: 200 OK (Acknowledged)
     Op->>K8s: Update Resource Status (Phase: Applied)
+
 ```
 
 ---
@@ -50,6 +51,7 @@ spec:
   target: database
   errorChance: 0.5
   errorBody: "K8s Operator Injected Error"
+
 ```
 
 ### Supported Specification Fields
@@ -64,6 +66,7 @@ spec:
 | `errorCode` | Optional | Integer. Custom status code for HTTP or gRPC (e.g., `503`, `14`). |
 | `errorBody` | Optional | String. Custom payload returned during an error. |
 | `dropConnection` | Optional | Boolean. Forcefully severs the TCP connection (Supported by specific drivers). |
+| `duration` | Optional | Total timeout before triggering an autonomous zero-state cluster rollback. |
 
 ---
 
@@ -85,10 +88,10 @@ The Operator needs to know where the Pastaay Engine's webhook is located. This i
 
 * **For Local Development (make run):**
   If your engine is running locally on port 2112:
+
 ```bash
 export PASTAAY_ENGINE_URL="http://localhost:2112/chaos/webhook"
 ```
-
 
 * **For In-Cluster Deployment:**
   By default, the operator falls back to `http://pastaay-engine.default.svc.cluster.local:2112/chaos/webhook`. If your engine is deployed in a different namespace or service, modify the deployment manifest (`config/manager/manager.yaml`) to inject the correct `PASTAAY_ENGINE_URL`.
@@ -131,7 +134,6 @@ kubectl get chaospolicy k8s-db-attack -o yaml
 status:
   lastAppliedTime: "2026-05-15T12:00:00Z"
   phase: Applied
-
 ```
 
 If the phase reads `Applied`, the Engine has actively loaded the policy into memory. If the Engine is unreachable or rejects the payload due to validation rules, the Operator will backoff and retry seamlessly.
@@ -145,8 +147,49 @@ The Pastaay Operator strictly adheres to the Principle of Least Privilege:
 * **Namespaced Execution:** The operator executes within the restricted `operator-system` namespace.
 * **RBAC Boundaries:** The auto-generated Role-Based Access Control (`config/rbac`) ensures the controller only has permissions to `GET`, `LIST`, `WATCH`, and `UPDATE` its own `ChaosPolicy` resources. It does not require broad cluster-admin privileges to interact with your workload pods.
 
+---
+
+## 6. Chaos Deletion Lifecycle & Finalizer Guard
+
+To prevent "Zombie Chaos States" where a policy is removed from the Kubernetes cluster but remains active inside the application runtime, the Pastaay Operator utilizes a native Kubernetes **Finalizer** (`chaos.pastaay.io/finalizer`).
+
+### The Safe Eviction Sequence:
+
+1. **Deletion Interception:** When `kubectl delete chaospolicy <name>` is executed, Kubernetes blocks the immediate hard-deletion and sets a `deletionTimestamp`.
+2. **Synchronous Engine Reset:** The Operator's reconcile loop captures the deletion event, builds an atomic empty-state payload (`{"version": 1, "policies": []}`), and POSTs it directly to the Pastaay Engine webhook.
+3. **Memory Flush ACK:** Once the Engine acknowledges the memory flush with an HTTP 200 OK, the Operator securely removes the finalizer string from the resource metadata.
+4. **Hard Deletion:** Kubernetes successfully removes the Custom Resource from the cluster cache, guaranteeing the fleet immediately returns to a pristine, 100% healthy baseline state.
+
+---
+
+## 7. Verification & Smoke Testing
+
+Follow these steps to verify both the dual-casing hybrid engine and the finalizer synchronization layer in your environment:
+
+### Step 7.1: Inject camelCase Manifest (Verify Hybrid Parser)
+
+Apply the cloud-native configuration manifest utilizing standard Kubernetes schema markers:
+
+```bash
+kubectl apply -f config/samples/chaos_v1_chaospolicy.yaml
+```
+
+* **Expected Tracking Output:** The operator updates the status to `Phase: Applied`. Check the engine logs or the Prometheus instrumentation endpoint (`:2112/metrics`) to verify that the fault properties were fully hydration-mapped in memory without dropping keys.
+
+### Step 7.2: Force Eviction (Verify Atomic Finalizer Rollback)
+
+Terminate the ongoing chaos experiment by dropping the custom resource:
+
+```bash
+kubectl delete chaospolicy redis-cache-jitter
+```
+
+* **Expected Tracking Output:** The cluster terminal will pause briefly while the Operator sends an ephemeral memory flush command to the Engine API. The resource is released cleanly, and target application networks will recover instantaneously without requiring a hot-swap or restart.
+
+
 <br>
 
 <p align="center">
   <img src="assets/common_bottom.gif" alt="Pastaay Bottom Banner">
 </p>
+

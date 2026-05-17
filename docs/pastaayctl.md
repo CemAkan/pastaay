@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/cli_header.png" alt="CLI Header"/>
+  <img src="assets/ctl_header.gif" alt="CLI Header"/>
 </p>
 
 **pastaayctl** is the central orchestrating command-line interface for the Pastaay Chaos Engine ecosystem. Engineered for high-scale fleet management in distributed architectures, it provides a unified platform for imperative fault injection, SLA-guarded autonomous experimentation, and real-time kinetic observability.
@@ -106,10 +106,6 @@ Pastaay includes a native, zero-dependency Multi-LLM client that acts as an auto
 * `--provider anthropic` (Defaults to `claude-3-5-sonnet-latest`)
 
 *You can dynamically override the default models using the `-m` or `--model` flag.*
-
-<p align="center">
-  <img src="assets/suppotred_ais.png" alt="Suppotred AIs Banner"/>
-</p>
 
 <br>
 
