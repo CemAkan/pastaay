@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/contributing_header.png" alt="Contributing Header">
+  <img src="docs/assets/contributing_header.png" alt="Contributing Header">
 </p>
 
 <br>
@@ -103,5 +103,8 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/). This hel
 4. Provide a clear and descriptive PR title and fill out the PR description with the *Why* and *How* of your changes.
 5. A maintainer will review your code. You may be asked to make structural changes. Once approved, it will be merged!
 
+<br>
 
-### Once again, thank you for helping make Pastaay a robust chaos engineering tool for the Go ecosystem <3
+<p align="center">
+  <img src="docs/assets/contributing_bottom.gif" alt="Contributing Bottom">
+</p>
