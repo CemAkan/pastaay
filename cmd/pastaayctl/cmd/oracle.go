@@ -103,10 +103,12 @@ func runOracle(cmd *cobra.Command, args []string) {
 	}
 }
 
+// gatherSystemContext pulls live YAML, topology, fault counts, and baseline latency
 func gatherSystemContext(ctx context.Context) string {
 	var sb strings.Builder
-	sb.WriteString("ACTIVE POLICIES:\n")
+	sb.WriteString("ACTIVE POLICIES (YAML):\n")
 
+	// Fetch Active Policies
 	exportURL := strings.TrimSuffix(targetURL, "/metrics") + "/chaos/export"
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, exportURL, nil)
 	if resp, err := telemetryClient.Do(req); err == nil {
@@ -115,21 +117,51 @@ func gatherSystemContext(ctx context.Context) string {
 		resp.Body.Close()
 	}
 
-	sb.WriteString("\nDISCOVERED TOPOLOGY:\n")
+	// Fetch Fault Metrics & Topology
+	sb.WriteString("\nKINETIC IMPACT (Faults Injected):\n")
 	reqMetrics, _ := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if resp, err := telemetryClient.Do(reqMetrics); err == nil {
 		scanner := bufio.NewScanner(resp.Body)
-		targets := make(map[string]bool)
+		faults := make(map[string]int)
+
 		for scanner.Scan() {
-			if m := targetLabelRegex.FindStringSubmatch(scanner.Text()); len(m) == 2 {
-				targets[m[1]] = true
+			line := scanner.Text()
+			// Re-uses faultRegex from telemetry.go
+			if m := faultRegex.FindStringSubmatch(line); len(m) == 4 {
+				faultType, target, countStr := m[1], m[2], m[3]
+				var count int
+				fmt.Sscanf(countStr, "%d", &count)
+
+				key := fmt.Sprintf("- Target: [%s] | Fault: %s", target, faultType)
+				faults[key] += count
 			}
 		}
 		resp.Body.Close()
-		for t := range targets {
-			sb.WriteString("- " + t + "\n")
+
+		if len(faults) == 0 {
+			sb.WriteString("No active faults recorded yet. System is pristine.\n")
+		} else {
+			for t, count := range faults {
+				sb.WriteString(fmt.Sprintf("%s | Total Hits: %d\n", t, count))
+			}
 		}
 	}
+
+	// Establish Baseline Latency (Health Probe)
+	sb.WriteString("\nCURRENT BASELINE HEALTH:\n")
+	healthURL := strings.Replace(targetURL, ":2112/metrics", ":8080/api/v1/ping", 1)
+
+	start := time.Now()
+	healthReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if resp, err := telemetryClient.Do(healthReq); err == nil {
+		latency := time.Since(start)
+		sb.WriteString(fmt.Sprintf("- Health Check URL: %s\n- Status Code: %d\n- Round-Trip Latency: %v\n", healthURL, resp.StatusCode, latency.Round(time.Millisecond)))
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	} else {
+		sb.WriteString(fmt.Sprintf("- Health Check URL: %s\n- Status: UNREACHABLE (Critical Error)\n", healthURL))
+	}
+
 	return sb.String()
 }
 
