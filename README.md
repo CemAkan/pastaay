@@ -77,8 +77,8 @@ Pastaay is a continuously evolving enterprise chaos engineering suite. Our devel
 | :--- | :--- | :--- |
 | **Current (v2.2)** | **Observability AI** | The Pastaay Oracle. Machine learning integration to analyze span throughput and health telemetry to autonomously suggest optimal blast radius configurations. |
 | **Next (v2.3)** | **Web Console** | Centralized web dashboard for direct fleet management, visual impact analysis, and interactive documentation. |
-| **Future** | **Mesh Chaos** | Distributed network-partitioning simulations via eBPF to disrupt pod-to-pod communication natively. |
----
+| **Future** | **CEL-Driven Rule Engine** | **Dynamic Evaluation:** Integrating Google's Common Expression Language (CEL) to allow complex, AST-compiled conditional chaos rules (e.g., payload limits, header regex) with zero-allocation overhead. |
+| **Future** | **Trace-Aware Injection** | **Context-Propagated Chaos:** Leveraging OpenTelemetry Baggage to inject faults based on the complete distributed request journey, targeting specific end-to-end transaction flows across the fleet. |
 
 ## Documentation
 
