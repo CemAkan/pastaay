@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v2.0.0-stable.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v2.1.0-stable.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
