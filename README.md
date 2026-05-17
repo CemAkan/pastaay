@@ -19,8 +19,9 @@
 * **Resource Sabotage:** Simulate CPU starvation and memory leaks with guaranteed cleanup via the Amnesia Protocol.
 * **Distributed Tracing:** Zero-allocation OpenTelemetry (OTLP) integration for visualizing chaos events across microservices without goroutine leaks.
 * **Kinetic Control Plane:** Fleet-wide chaos orchestration via the **`pastaayctl`** CLI, featuring imperative strikes, SLA-guarded autopilot experiments, and real-time telemetry dashboards.
-* **Kubernetes Native (NEW):** Seamlessly manage chaos experiments via Custom Resource Definitions (`ChaosPolicy`). Fully compatible with GitOps workflows like ArgoCD and Flux via the Pastaay Operator.
-
+* **Kubernetes Native:** Seamlessly manage chaos experiments via Custom Resource Definitions (`ChaosPolicy`). Fully compatible with GitOps workflows like ArgoCD and Flux via the Pastaay Operator.
+* **CI/CD Pipeline Integration:** Native GitHub Action (`pastaay-strike`) to execute SLA-guarded chaos experiments directly in your CI pipelines, preventing weak code from reaching production.
+* **GitOps Ready:** Full reference architectures for ArgoCD and Flux. Manage your chaos policies as code, with autonomous rollbacks powered by the Operator's new `duration` spec.
 ---
 
 ## Hot-Reloading & Reactivity
@@ -64,9 +65,9 @@ Pastaay is a continuously evolving enterprise chaos engineering suite. Our devel
 
 | Phase | Theme | Architecture Goals |
 | :--- | :--- | :--- |
-| **Current (v2.0)** | **The Kinetic Ecosystem** | Enterprise CLI (`pastaayctl`), Kubernetes Operator (`pastaay-operator` via CRDs), SLA-guarded autopilot, and multi-phase validation guards. |
-| **Next (v2.1)** | **GitOps & Pipelines** | Native GitHub Actions and GitLab CI integrations for Chaos-as-Code and automated deployment rollbacks. |
-| **Future** | **Web Console & AI Intelligence** | Centralized web dashboard for direct fleet management, visual impact analysis, interactive documentation, and ML-driven blast radius adjustments. |
+| **Current (v2.1)** | **GitOps & Pipelines** | Native GitHub Actions and GitLab CI integrations for Chaos-as-Code and automated deployment rollbacks via K8s Operator. |
+| **Next (v2.2)** | **Observability AI** | Machine learning analysis on span throughput to automatically suggest optimal blast radius configurations. |
+| **Future** | **Web Console** | Centralized web dashboard for direct fleet management, visual impact analysis, and interactive documentation. |
 
 ---
 
@@ -78,7 +79,7 @@ Dive deep into Pastaay's mechanics using our official documentation:
 * [Remote Control & Cloud-Native Sensors](docs/remote_control.md) - Learn how to securely control chaos across massive fleets via Redis, Kubernetes, or Webhooks.
 * [pastaayctl: Kinetic Control Plane Reference](docs/pastaayctl.md) - Master the CLI to orchestrate fleet-wide chaos, run SLA-guarded autopilot experiments, and monitor real-time kinetic impact.
 * [Pastaay Kubernetes Operator](docs/operator.md) - Learn how to deploy the operator and manage chaos natively using Kubernetes CRDs.
-
+* [GitOps & CI/CD Integrations](examples/gitops/README.md) - Reference architectures for declarative chaos management via ArgoCD and pipeline automation.
 ---
 ##  Installation
 
@@ -151,7 +152,7 @@ func main() {
 make -C operator install
 
 # Deploy the operator to your cluster
-make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.0.0
+make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.1.0
 ```
 
 ---

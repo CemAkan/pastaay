@@ -239,9 +239,8 @@ Pastaay includes a senior-grade control plane designed to manage the lifecycle o
 
 ### Pastaay Kubernetes Operator (Cloud-Native Orchestrator)
 * **CRD Management:** Introduces the `ChaosPolicy` Custom Resource, allowing SREs to manage chaos rules natively via `kubectl`.
+* **Autonomous Rollbacks:** Acts as a cluster-level Dead Man's Switch. By parsing the `duration` field in the CRD, the operator schedules highly-precise reconciliation awakenings to automatically revoke chaos policies when their time expires.
 * **GitOps Ready:** Fully compatible with ArgoCD and Flux. You can store your chaos policies in Git and let the Operator sync them directly into the Pastaay Engine's memory via authenticated webhooks.
-* **Autonomous Reconciliation:** Operates on a continuous reconciliation loop, ensuring the active chaos state exactly matches the declared state in your Kubernetes cluster.
-
 ---
 
 ### Appendix: OpenTelemetry Span Reference

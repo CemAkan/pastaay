@@ -53,6 +53,10 @@ type ChaosPolicySpec struct {
 	// +optional
 	ErrorBody string `json:"errorBody,omitempty"`
 
+	// Duration of the chaos experiment (e.g., "30s", "2m"). If omitted, the policy runs indefinitely.
+	// +optional
+	Duration string `json:"duration,omitempty"`
+
 	// Forcefully drop the connection (requires target: all or database)
 	// +optional
 	DropConnection bool `json:"dropConnection,omitempty"`

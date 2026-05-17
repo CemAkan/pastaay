@@ -43,6 +43,10 @@ spec:
                 description: 'Forcefully drop the connection (requires target: all
                   or database)'
                 type: boolean
+              duration:
+                description: Duration of the chaos experiment (e.g., "30s", "2m").
+                  If omitted, the policy runs indefinitely.
+                type: string
               errorBody:
                 description: Custom error message body to be returned
                 type: string
