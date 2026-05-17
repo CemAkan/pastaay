@@ -27,10 +27,9 @@ However, to prevent the chaos engine *itself* from crashing due to malformed pay
 * **Metric Cardinality Protection:** To prevent "Label Explosion" and subsequent Prometheus memory exhaustion, all generated `MetricTag` values are strictly truncated to a maximum of 64 characters. This ensures telemetry stability even if users input raw, high-entropy SQL queries as chaos targets.
 * **Logical Sanity:** Rejects negative probabilities, negative durations, and negative resource allocations.
 * **Protocol Sanity:**
-* **HTTP:** Error codes must be within the valid `100-599` range.
-* **gRPC:** Status codes must follow the official Google RPC specification (`0-16`).
-* **SQL:** Targets are pre-compiled as regex; invalid regex patterns are rejected instantly to prevent runtime panics.
-
+    * **HTTP:** Error codes must be within the valid `100-599` range.
+    * **gRPC:** Status codes must follow the official Google RPC specification (`0-16`).
+    * **SQL:** Targets are pre-compiled as regex; invalid regex patterns are rejected instantly to prevent runtime panics.
 
 * **Atomic Rollback:** If any single policy within a batch payload fails structural validation, the entire payload is rejected using `errors.Join`, maintaining the engine's last-known-good state.
 
@@ -195,7 +194,7 @@ Pastaay supports cascading chaos rules. A single route can be targeted by multip
 Pastaay is heavily hardened against the "Linux File-Save Amnesia" bug. Standard editors (Vim, Nano) and deployment pipelines often delete the original file inode during a save operation, which breaks standard filesystem watchers.
 
 * **Recovery**: Pastaay natively traps `Rename/Remove` filesystem events.
-* **Re-attachment**: It engages an asynchronous retry loop to re-attach the `fsnotify` watcher to the new file inode instantly, 
+* **Re-attachment**: It engages an asynchronous retry loop to re-attach the `fsnotify` watcher to the new file inode instantly, ensuring zero downtime during configuration swaps.
 
 ---
 
@@ -226,3 +225,9 @@ The CRD `spec` fields map 1:1 with the standard `pastaay.yaml` properties, but t
 
 **Operator-Specific Fields:**
 * `duration`: *(String, Optional)* Exclusive to the Kubernetes Operator. Defines the total time the chaos experiment should run (e.g., `"45s"`, `"2m"`). Once this duration expires, the Operator autonomously triggers a rollback, reverting the cluster to a stable state. Acts as a native Dead Man's Switch.
+
+<br>
+
+<p align="center">
+  <img src="assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+</p>

@@ -144,3 +144,9 @@ The Pastaay Operator strictly adheres to the Principle of Least Privilege:
 
 * **Namespaced Execution:** The operator executes within the restricted `operator-system` namespace.
 * **RBAC Boundaries:** The auto-generated Role-Based Access Control (`config/rbac`) ensures the controller only has permissions to `GET`, `LIST`, `WATCH`, and `UPDATE` its own `ChaosPolicy` resources. It does not require broad cluster-admin privileges to interact with your workload pods.
+
+<br>
+
+<p align="center">
+  <img src="assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+</p>

@@ -16,3 +16,9 @@ In enterprise environments, executing chaos strikes manually via CLI is risky an
 1. Fork or create a repository for your Kubernetes manifests.
 2. Place your `ChaosPolicy` YAML files in a designated path (e.g., `chaos-engineering/production`).
 3. Apply the `argocd-application.yaml` to your cluster. ArgoCD will now continuously monitor your Git repository and synchronize the chaos policies directly to the Pastaay Operator.
+
+<br>
+
+<p align="center">
+  <img src="../../docs/assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+</p>
