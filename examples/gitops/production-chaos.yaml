@@ -6,8 +6,8 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 spec:
-  type: sql
-  target: database
-  errorChance: 0.15          # %15 Error Rate
-  duration: "45s"            # Auto-Rollback
+  type: "sql"
+  target: "database"
+  errorChance: 0.15   # %15 Error Rate
+  duration: "45s"     # Auto-Rollback
   errorBody: "GitOps Automated Chaos Strike"
