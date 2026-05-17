@@ -63,7 +63,21 @@ func runOracle(cmd *cobra.Command, args []string) {
 
 	finalPrompt := fmt.Sprintf("User Request: %s\n\n--- LIVE SYSTEM CONTEXT ---\n%s", userPrompt, sysContext)
 
-	response, err := callOpenAIFormat(apiKey, systemPrompt, finalPrompt)
+	var response string
+	var err error
+
+	switch strings.ToLower(aiProvider) {
+	case "openai":
+		response, err = callOpenAIFormat(apiKey, systemPrompt, finalPrompt)
+	case "gemini":
+		response, err = callGeminiFormat(apiKey, systemPrompt, finalPrompt)
+	case "anthropic":
+		response, err = callAnthropicFormat(apiKey, systemPrompt, finalPrompt)
+	default:
+		fmt.Printf("\n%s[!] Unknown Provider: %s. Supported: openai, gemini, anthropic%s\n", cRed, aiProvider, cReset)
+		os.Exit(1)
+	}
+
 	if err != nil {
 		fmt.Printf("\n%s[!] Oracle Link Severed: %v%s\n", cRed, err, cReset)
 		os.Exit(1)
@@ -180,4 +194,107 @@ func extractYAML(response string) string {
 	}
 
 	return strings.TrimSpace(response[start : start+end])
+}
+
+// callGeminiFormat integrates with Google's Gemini API (Google AI Studio)
+func callGeminiFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
+	// Note: Gemini puts the key in the URL query parameters
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" + apiKey
+
+	// Gemini combines system prompt into the main request for standard REST
+	combinedPrompt := fmt.Sprintf("SYSTEM INSTRUCTIONS:\n%s\n\nUSER REQUEST:\n%s", sysPrompt, userPrompt)
+
+	payload := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]string{
+					{"text": combinedPrompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature": 0.3,
+		},
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Gemini API returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
+		return result.Candidates[0].Content.Parts[0].Text, nil
+	}
+	return "", fmt.Errorf("empty response from Gemini")
+}
+
+// callAnthropicFormat integrates with Anthropic's Claude Messages API
+func callAnthropicFormat(apiKey, sysPrompt, userPrompt string) (string, error) {
+	url := "https://api.anthropic.com/v1/messages"
+
+	payload := map[string]interface{}{
+		"model":      "claude-3-opus-20240229",
+		"max_tokens": 1024,
+		"system":     sysPrompt,
+		"messages": []map[string]string{
+			{"role": "user", "content": userPrompt},
+		},
+		"temperature": 0.3,
+	}
+
+	jsonData, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Anthropic API returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if len(result.Content) > 0 {
+		return result.Content[0].Text, nil
+	}
+	return "", fmt.Errorf("empty response from Anthropic")
 }
