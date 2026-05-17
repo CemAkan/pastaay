@@ -222,5 +222,7 @@ spec:
 ```
 
 ### Spec Field Mapping
-
 The CRD `spec` fields map 1:1 with the standard `pastaay.yaml` properties, but they utilize Kubernetes-standard `camelCase` naming conventions instead of `snake_case` (e.g., `latency_chance` becomes `latencyChance`).
+
+**Operator-Specific Fields:**
+* `duration`: *(String, Optional)* Exclusive to the Kubernetes Operator. Defines the total time the chaos experiment should run (e.g., `"45s"`, `"2m"`). Once this duration expires, the Operator autonomously triggers a rollback, reverting the cluster to a stable state. Acts as a native Dead Man's Switch.
