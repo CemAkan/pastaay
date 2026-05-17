@@ -25,11 +25,6 @@ var (
 	targetLabelRegex = regexp.MustCompile(`target="((?:[^"\\]|\\.)*)"`)
 )
 
-var viewCmd = &cobra.Command{
-	Use:   "view",
-	Short: "Fleet observability: Monitor sensors, live faults, and topology",
-}
-
 var topCmd = &cobra.Command{Use: "top", Short: "Live Dashboard: Real-time kinetic view of chaos impact", Run: runTop}
 var statusCmd = &cobra.Command{Use: "status", Short: "Fleet Status: Quick health check of all remote sensors", Run: runStatus}
 var discoverCmd = &cobra.Command{Use: "discover", Short: "Topology Discovery: Map injectable services and endpoints", Run: runDiscover}

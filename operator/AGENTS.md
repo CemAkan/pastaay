@@ -36,6 +36,10 @@ Multi-group layout organizes APIs by group name (e.g., `batch`, `apps`). Check t
 
 ## Critical Rules
 
+### Pastaay Core Invariants (Engine Protection Rules)
+- **Never Break Dual-Casing (Hybrid Parser):** Pastaay Engine exposes standard `snake_case` yaml fields for local binaries but uses custom `UnmarshalYAML` vectors to catch cloud-native `camelCase` tags injected by this Operator. When expanding fields in `*_types.go`, ensure structural tags strictly preserve json mappings (`json:"latencyChance"`) and map configurations match `pkg/config/config.go`.
+- **Never Evict the Finalizer Protection Loop:** The controller MUST explicitly protect resource destruction using `chaos.pastaay.io/finalizer`. Any modifications to the `Reconcile` function must ensure that an empty atomic rollback payload (`{"version": 1, "policies": []}`) is successfully acknowledged by the Engine API before releasing the finalizer string.
+
 ### Never Edit These (Auto-Generated)
 - `config/crd/bases/*.yaml` - from `make manifests`
 - `config/rbac/role.yaml` - from `make manifests`

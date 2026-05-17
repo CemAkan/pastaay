@@ -6,28 +6,89 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Policy struct {
-	Name              string            `yaml:"name"`
-	Target            string            `yaml:"target"`
-	Type              string            `yaml:"type"`
-	LatencyChance     float64           `yaml:"latency_chance"`
-	LatencyDuration   time.Duration     `yaml:"latency_duration"`
-	ErrorChance       float64           `yaml:"error_chance"`
-	ErrorCode         int               `yaml:"error_code,omitempty"`
-	ErrorBody         string            `yaml:"error_body,omitempty"`
-	MatchHeaders      map[string]string `yaml:"match_headers,omitempty"`
-	DropConnection    bool              `yaml:"drop_connection,omitempty"`
-	StreamRollMode    string            `yaml:"stream_roll_mode,omitempty"`
-	ThrottleThreshold int               `yaml:"throttle_threshold,omitempty"`
-	RAMChunkMB        int               `yaml:"ram_chunk_mb,omitempty"`
-	RAMInterval       time.Duration     `yaml:"ram_interval,omitempty"`
-	CompiledRegex     *regexp.Regexp    `yaml:"-"`
-	PolicyHash        uint64            `yaml:"-"`
-	MetricTag         string            `yaml:"-"`
-	IsWildcard        bool              `yaml:"-"`
-	WildcardPrefix    string            `yaml:"-"`
+	Name              string            `yaml:"name" json:"name"`
+	Target            string            `yaml:"target" json:"target"`
+	Type              string            `yaml:"type" json:"type"`
+	LatencyChance     float64           `yaml:"latency_chance" json:"latencyChance"`
+	LatencyDuration   time.Duration     `yaml:"latency_duration" json:"latencyDuration"`
+	ErrorChance       float64           `yaml:"error_chance" json:"errorChance"`
+	ErrorCode         int               `yaml:"error_code,omitempty" json:"errorCode,omitempty"`
+	ErrorBody         string            `yaml:"error_body,omitempty" json:"errorBody,omitempty"`
+	MatchHeaders      map[string]string `yaml:"match_headers,omitempty" json:"matchHeaders,omitempty"`
+	DropConnection    bool              `yaml:"drop_connection,omitempty" json:"dropConnection,omitempty"`
+	StreamRollMode    string            `yaml:"stream_roll_mode,omitempty" json:"streamRollMode,omitempty"`
+	ThrottleThreshold int               `yaml:"throttle_threshold,omitempty" json:"throttleThreshold,omitempty"`
+	RAMChunkMB        int               `yaml:"ram_chunk_mb,omitempty" json:"ramChunkMB,omitempty"`
+	RAMInterval       time.Duration     `yaml:"ram_interval,omitempty" json:"ramInterval,omitempty"`
+	CompiledRegex     *regexp.Regexp    `yaml:"-" json:"-"`
+	PolicyHash        uint64            `yaml:"-" json:"-"`
+	MetricTag         string            `yaml:"-" json:"-"`
+	IsWildcard        bool              `yaml:"-" json:"-"`
+	WildcardPrefix    string            `yaml:"-" json:"-"`
+}
+
+// UnmarshalYAML implements custom dual-casing support to capture both snake_case and camelCase parameters.
+func (p *Policy) UnmarshalYAML(value *yaml.Node) error {
+	type shadowPolicy Policy
+	var s shadowPolicy
+	// First, parse standard tags (snake_case)
+	if err := value.Decode(&s); err != nil {
+		return err
+	}
+	*p = Policy(s)
+
+	// Decode into a raw node map to dynamically catch camelCase fallbacks from K8s/JSON streams
+	var rawMap map[string]yaml.Node
+	if err := value.Decode(&rawMap); err != nil {
+		return nil // Non-map payloads are safely bypassed
+	}
+
+	if node, ok := rawMap["latencyChance"]; ok && p.LatencyChance == 0 {
+		_ = node.Decode(&p.LatencyChance)
+	}
+	if node, ok := rawMap["latencyDuration"]; ok && p.LatencyDuration == 0 {
+		var dStr string
+		if err := node.Decode(&dStr); err == nil {
+			p.LatencyDuration, _ = time.ParseDuration(dStr)
+		}
+	}
+	if node, ok := rawMap["errorChance"]; ok && p.ErrorChance == 0 {
+		_ = node.Decode(&p.ErrorChance)
+	}
+	if node, ok := rawMap["errorCode"]; ok && p.ErrorCode == 0 {
+		_ = node.Decode(&p.ErrorCode)
+	}
+	if node, ok := rawMap["errorBody"]; ok && p.ErrorBody == "" {
+		_ = node.Decode(&p.ErrorBody)
+	}
+	if node, ok := rawMap["matchHeaders"]; ok && len(p.MatchHeaders) == 0 {
+		_ = node.Decode(&p.MatchHeaders)
+	}
+	if node, ok := rawMap["dropConnection"]; ok && !p.DropConnection {
+		_ = node.Decode(&p.DropConnection)
+	}
+	if node, ok := rawMap["streamRollMode"]; ok && p.StreamRollMode == "" {
+		_ = node.Decode(&p.StreamRollMode)
+	}
+	if node, ok := rawMap["throttleThreshold"]; ok && p.ThrottleThreshold == 0 {
+		_ = node.Decode(&p.ThrottleThreshold)
+	}
+	if node, ok := rawMap["ramChunkMB"]; ok && p.RAMChunkMB == 0 {
+		_ = node.Decode(&p.RAMChunkMB)
+	}
+	if node, ok := rawMap["ramInterval"]; ok && p.RAMInterval == 0 {
+		var dStr string
+		if err := node.Decode(&dStr); err == nil {
+			p.RAMInterval, _ = time.ParseDuration(dStr)
+		}
+	}
+
+	return nil
 }
 
 type PastaayConfig struct {

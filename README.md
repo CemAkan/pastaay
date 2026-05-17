@@ -5,23 +5,29 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v2.1.0-stable.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v2.2.0-stable.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
 ## Core Architecture & Features
 
-* **Universal Chaos:** Native interceptors for Kafka, RabbitMQ, HTTP, gRPC, SQL, MongoDB, and Redis.
-* **Security Hardened:** Constant-time token verification (mitigates timing attacks), memory-bounded payload processing (`io.LimitReader`), and native evasion protection for SQL/HTTP boundaries.
-* **Deterministic Cascading:** Complex gRPC stream rules with stable session hashing that do not short-circuit.
-* **Self-Aware Sensors:** Real-time health monitoring and asynchronous telemetry for all remote control providers (K8s, Redis, Webhooks).
+**The Chaos Engine**
+* **Universal Interceptors:** Native fault injection for Kafka, RabbitMQ, HTTP, gRPC, SQL, MongoDB, and Redis.
 * **Resource Sabotage:** Simulate CPU starvation and memory leaks with guaranteed cleanup via the Amnesia Protocol.
+* **Security Hardened:** Constant-time token verification, memory-bounded payload processing (`io.LimitReader`), and native evasion protection.
+* **Deterministic Cascading:** Complex gRPC stream rules with stable session hashing that do not short-circuit.
+
+**Control & Observability**
+* **AI SRE Copilot (Oracle):** Native multi-LLM integration (Gemini, Claude, GPT) that autonomously analyzes live telemetry to generate and inject optimal chaos configurations.
+* **Kinetic Control Plane:** Fleet-wide orchestration via the **`pastaayctl`** CLI, featuring imperative strikes, SLA-guarded autopilot, and real-time telemetry dashboards.
 * **Distributed Tracing:** Zero-allocation OpenTelemetry (OTLP) integration for visualizing chaos events across microservices without goroutine leaks.
-* **Kinetic Control Plane:** Fleet-wide chaos orchestration via the **`pastaayctl`** CLI, featuring imperative strikes, SLA-guarded autopilot experiments, and real-time telemetry dashboards.
-* **Kubernetes Native:** Seamlessly manage chaos experiments via Custom Resource Definitions (`ChaosPolicy`). Fully compatible with GitOps workflows like ArgoCD and Flux via the Pastaay Operator.
-* **CI/CD Pipeline Integration:** Native GitHub Action (`pastaay-strike`) to execute SLA-guarded chaos experiments directly in your CI pipelines, preventing weak code from reaching production.
-* **GitOps Ready:** Full reference architectures for ArgoCD and Flux. Manage your chaos policies as code, with autonomous rollbacks powered by the Operator's new `duration` spec.
+* **Self-Aware Sensors:** Real-time health monitoring and asynchronous telemetry for remote control providers.
+
+**Cloud-Native & GitOps**
+* **Kubernetes Native:** Seamlessly manage chaos via Custom Resource Definitions (`ChaosPolicy`) powered by the Pastaay Operator.
+* **GitOps Ready:** Full reference architectures for ArgoCD and Flux with autonomous rollbacks powered by the new `duration` spec.
+* **CI/CD Integration:** Native GitHub Action (`pastaay-strike`) to execute SLA-guarded chaos experiments directly in your pipelines.
 ---
 
 ## Hot-Reloading & Reactivity
@@ -61,15 +67,18 @@ Pastaay is built to survive high-throughput data streams. Our core evaluator gua
 
 ## Evolution & Roadmap
 
+<p align="center">
+  <img src="docs/assets/milkshake4drBishop.gif" alt="FRINGE <3">
+</p>
+
 Pastaay is a continuously evolving enterprise chaos engineering suite. Our development phases are strictly focused on cloud-native scalability and GitOps integrations.
 
 | Phase | Theme | Architecture Goals |
 | :--- | :--- | :--- |
-| **Current (v2.1)** | **GitOps & Pipelines** | Native GitHub Actions and GitLab CI integrations for Chaos-as-Code and automated deployment rollbacks via K8s Operator. |
-| **Next (v2.2)** | **Observability AI** | Machine learning analysis on span throughput to automatically suggest optimal blast radius configurations. |
-| **Future** | **Web Console** | Centralized web dashboard for direct fleet management, visual impact analysis, and interactive documentation. |
-
----
+| **Current (v2.2)** | **Observability AI** | The Pastaay Oracle. Machine learning integration to analyze span throughput and health telemetry to autonomously suggest optimal blast radius configurations. |
+| **Next (v2.3)** | **Web Console** | Centralized web dashboard for direct fleet management, visual impact analysis, and interactive documentation. |
+| **Future** | **CEL-Driven Rule Engine** | **Dynamic Evaluation:** Integrating Google's Common Expression Language (CEL) to allow complex, AST-compiled conditional chaos rules (e.g., payload limits, header regex) with zero-allocation overhead. |
+| **Future** | **Trace-Aware Injection** | **Context-Propagated Chaos:** Leveraging OpenTelemetry Baggage to inject faults based on the complete distributed request journey, targeting specific end-to-end transaction flows across the fleet. |
 
 ## Documentation
 
@@ -80,7 +89,9 @@ Dive deep into Pastaay's mechanics using our official documentation:
 * [pastaayctl: Kinetic Control Plane Reference](docs/pastaayctl.md) - Master the CLI to orchestrate fleet-wide chaos, run SLA-guarded autopilot experiments, and monitor real-time kinetic impact.
 * [Pastaay Kubernetes Operator](docs/operator.md) - Learn how to deploy the operator and manage chaos natively using Kubernetes CRDs.
 * [GitOps & CI/CD Integrations](examples/gitops/README.md) - Reference architectures for declarative chaos management via ArgoCD and pipeline automation.
+
 ---
+
 ##  Installation
 
 ```bash
@@ -152,7 +163,7 @@ func main() {
 make -C operator install
 
 # Deploy the operator to your cluster
-make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.1.0
+make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.2.0
 ```
 
 ---
@@ -168,7 +179,6 @@ cd examples/demo
 docker compose up -d --build
 docker compose logs -f app
 ```
-
 
 * **API:** `http://localhost:8080`
 * **Metrics:** `http://localhost:2112/metrics`
@@ -202,9 +212,10 @@ Please read the [Contributing Guide](CONTRIBUTING.md) for detailed instructions 
 
 Pastaay is open-sourced software licensed under the [MIT License](LICENSE).
 
----
+<br>
 
 <p align="center">
   <img src="docs/assets/main_bottom.png" alt="Pastaay QR Code">
 </p>
+
 

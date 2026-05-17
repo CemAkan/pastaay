@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/arch_header.png" alt="Architecture Header"/>
+  <img src="assets/arch_header.gif" alt="Architecture Header"/>
 </p>
 
 Welcome to the engine room. This document outlines the core design decisions, memory management strategies, and deep OS/compiler integrations that allow the chaos engine to inject faults into high-throughput microservices without becoming a bottleneck.

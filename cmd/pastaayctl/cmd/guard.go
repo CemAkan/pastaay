@@ -9,12 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// guardCmd acts as the parent for all safety and simulation tools
-var guardCmd = &cobra.Command{
-	Use:   "guard",
-	Short: "Safety & Strategy: Lint, plan, and validate chaos policies",
-}
-
 // Sub-Command: Lint
 var lintCmd = &cobra.Command{
 	Use:   "lint [file.yaml]",

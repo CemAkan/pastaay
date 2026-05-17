@@ -1,6 +1,10 @@
 package cmd
 
 import (
+	"fmt"
+	"math/rand/v2"
+	"time"
+
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +24,7 @@ const (
 	cBold   = "\033[1m"
 	cGray   = "\033[90m"
 	cPurple = "\033[35m"
+	cWhite  = "\033[37m"
 )
 
 const splash = `
@@ -33,7 +38,8 @@ const splash = `
 var rootCmd = &cobra.Command{
 	Use:   "pastaayctl",
 	Short: "Enterprise Chaos Orchestrator",
-	Long:  cCyan + splash + cReset + "\n\n" + cGray + "Neural Link established for Pastaay Engine v2.0." + cReset,
+
+	Long: cCyan + splash + cReset + "\n\n" + cGray + "Neural Link established for Pastaay Engine v2.0.\n\"Nature doesn't recognize good and evil... only balance and imbalance.\"" + cReset,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
@@ -52,6 +58,7 @@ func init() {
 
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		setupEnvironment()
+		triggerWhiteTulipAnomaly()
 	}
 }
 
@@ -73,8 +80,8 @@ func buildCustomHelpTemplate() {
 	cmdMap := map[string]string{
 		"strike": "attack", "inject": "attack", "snipe": "attack", "rollback": "attack", "broadcast": "attack", "run": "attack",
 		"top": "view", "status": "view", "discover": "view", "inspect": "view",
-		"lint": "guard", "plan": "guard", "validate": "guard", "autopilot": "guard",
-		"audit": "system", "profile": "system", "generate": "system", "export": "system",
+		"lint": "guard", "plan": "guard", "validate": "guard", "autopilot": "guard", "oracle": "guard",
+		"audit": "system", "profile": "system", "util": "system",
 	}
 
 	for _, cmd := range rootCmd.Commands() {
@@ -115,5 +122,35 @@ func setupEnvironment() {
 	}
 	if targetURL == "" {
 		targetURL = "http://localhost:2112/metrics"
+	}
+}
+
+func triggerWhiteTulipAnomaly() {
+
+	if rand.Float64() < 0.01 {
+		tulip := "              \n" +
+			"     /\\^/`\\   \n" +
+			"    | \\/   |  \n" +
+			"    | |    |  \n" +
+			"    \\ \\    /  \n" +
+			"     '\\\\//'   \n" +
+			"       ||     \n" +
+			"       ||     \n" +
+			"       ||     \n" +
+			"       ||  ,  \n" +
+			"   |\\  ||  |\\ \n" +
+			"   | | ||  | |\n" +
+			"   | | || / / \n" +
+			"    \\ \\||/ /  \n" +
+			"     `\\\\//`   \n" +
+			"    ^^^^^^^^  "
+
+		fmt.Print("\033[H\033[2J")
+		fmt.Printf("\n%s[SYSTEM ANOMALY DETECTED]%s\n", cBold+cRed, cReset)
+		fmt.Printf("%s%s%s\n\n", cBold+cWhite, tulip, cReset)
+		fmt.Printf("%s\"I asked God for a sign of forgiveness. A specific one. A white tulip.\"\n - W.B.%s\n\n", cGray, cReset)
+
+		time.Sleep(7 * time.Second)
+		fmt.Print("\033[H\033[2J")
 	}
 }

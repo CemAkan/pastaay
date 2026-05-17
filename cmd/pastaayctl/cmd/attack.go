@@ -145,6 +145,7 @@ func runSnipe(cmd *cobra.Command, args []string) {
 
 func runRollback(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s[!] EMERGENCY OVERRIDE INITIATED...%s\n", cYellow, cReset)
+	fmt.Printf("%s[*] \"Some things are meant to be left alone...\"%s\n", cGray, cReset)
 	strikeTTL = 0
 	reset := []byte(`{"version": 1, "policies": []}`)
 	dispatch(reset)

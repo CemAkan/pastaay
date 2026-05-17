@@ -95,6 +95,7 @@ func runAutopilot(cmd *cobra.Command, args []string) {
 		if !ok || latency > 400*time.Millisecond {
 			fmt.Printf("%s[SLA BREACHED]%s\n", cRed, cReset)
 			fmt.Printf("\n%s═══ FATAL LIMIT DETECTED ═══%s\n", cBold+cRed, cReset)
+			fmt.Printf("%s\"Only those who could risk going too far can possibly know how far they can go.\" - W.B.%s\n\n", cPurple, cReset)
 			fmt.Printf("Critical Load: %.0f%%\nRecovery: Initiated\n", currentChance*100)
 
 			recordStrike("autopilot", "ramp-test", "FAILED")

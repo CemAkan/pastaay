@@ -29,7 +29,8 @@ var exportCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(generateCmd, exportCmd)
+	rootCmd.AddCommand(utilCmd)
+	utilCmd.AddCommand(generateCmd, exportCmd)
 }
 
 func runGenerate(cmd *cobra.Command, args []string) {
