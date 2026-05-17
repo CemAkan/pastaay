@@ -45,6 +45,8 @@ func init() {
 func runOracle(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s[#] WAKING PASTAAY ORACLE...%s\n", cBold+cPurple, cReset)
 
+	fmt.Printf("  %s[*] \"We're pushing the boundaries of all that is real and possible. We're not roasting a turkey.\"%s\n", cGray, cReset)
+
 	apiKey := aiKey
 	if apiKey == "" {
 		apiKey = os.Getenv("PASTAAY_AI_KEY")
