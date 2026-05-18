@@ -1,0 +1,78 @@
+{{ define "docs_content" }}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+<div class="flex h-full gap-6">
+    <div class="w-64 bg-gray-800 border border-gray-700 rounded-lg p-4 h-fit">
+        <h3 class="text-lg font-bold text-gray-200 mb-4 border-b border-gray-700 pb-2">Documents</h3>
+        <ul class="space-y-2 text-sm font-mono" id="doc-list">
+            <li><a href="#" onclick="loadDoc('architecture.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">architecture.md</a></li>
+            <li><a href="#" onclick="loadDoc('configuration.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">configuration.md</a></li>
+            <li><a href="#" onclick="loadDoc('operator.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">operator.md</a></li>
+            <li><a href="#" onclick="loadDoc('pastaayctl.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">pastaayctl.md</a></li>
+            <li><a href="#" onclick="loadDoc('remote_control.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">remote_control.md</a></li>
+        </ul>
+    </div>
+
+    <div class="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-8 overflow-y-auto">
+        <div id="md-viewer" class="prose prose-invert max-w-none">
+            <p class="text-gray-400 animate-pulse font-mono">Select a document to read...</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Syntax Highlight
+    marked.setOptions({
+        highlight: function(code, lang) {
+            if (lang && hljs.getLanguage(lang)) {
+                return hljs.highlight(code, { language: lang }).value;
+            }
+            return hljs.highlightAuto(code).value;
+        }
+    });
+
+    function loadDoc(filename) {
+        document.getElementById('md-viewer').innerHTML = '<p class="text-cyan-400 animate-pulse font-mono">Reading ' + filename + ' from engine memory...</p>';
+
+
+        fetch('/console/docs/raw/' + filename)
+            .then(response => {
+                if (!response.ok) throw new Error("Document not found in engine memory");
+                return response.text();
+            })
+            .then(text => {
+
+                text = text.replace(/src="assets\//g, 'src="/console/docs/raw/assets/');
+                text = text.replace(/src="\.\.\/\.\.\/docs\/assets\//g, 'src="/console/docs/raw/assets/');
+
+                document.getElementById('md-viewer').innerHTML = marked.parse(text);
+            })
+            .catch(err => {
+                document.getElementById('md-viewer').innerHTML = '<p class="text-red-400 font-mono">Error: ' + err.message + '</p>';
+            });
+    }
+
+    window.onload = () => loadDoc('architecture.md');
+</script>
+
+<style>
+    .prose h1 { font-size: 2.25rem; font-weight: 700; margin-bottom: 1rem; color: #f3f4f6; }
+    .prose h2 { font-size: 1.5rem; font-weight: 600; margin-top: 2rem; margin-bottom: 1rem; color: #e5e7eb; border-bottom: 1px solid #374151; padding-bottom: 0.5rem;}
+    .prose h3 { font-size: 1.25rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: #d1d5db; }
+    .prose p { margin-bottom: 1.25rem; line-height: 1.75; color: #9ca3af; }
+    .prose ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1.25rem; color: #9ca3af; }
+    .prose ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1.25rem; color: #9ca3af; }
+    .prose a { color: #22d3ee; text-decoration: none; }
+    .prose a:hover { text-decoration: underline; }
+    .prose code { background-color: #374151; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.875em; color: #f87171;}
+    .prose pre { background-color: #1f2937; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1.25rem; border: 1px solid #374151;}
+    .prose pre code { background-color: transparent; padding: 0; color: inherit; }
+    .prose table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
+    .prose th, .prose td { border: 1px solid #374151; padding: 0.75rem; text-align: left; color: #9ca3af;}
+    .prose th { background-color: #1f2937; font-weight: 600; color: #d1d5db; }
+    .prose blockquote { border-left: 4px solid #4b5563; padding-left: 1rem; color: #9ca3af; font-style: italic; margin-bottom: 1.25rem; }
+    .prose img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 1rem 0; }
+</style>
+{{ end }}
