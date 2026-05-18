@@ -69,6 +69,16 @@ func AskOracle(provider, key, model, intensity, userPrompt, sysContext string) (
 			model = "deepseek-reasoner"
 		}
 		return callLLM(key, model, "https://api.deepseek.com/v1/chat/completions", systemPrompt, finalPrompt, "deepseek")
+	case "gemini":
+		if model == "" {
+			model = "gemini-2.5-flash"
+		}
+		return callGemini(key, model, systemPrompt, finalPrompt)
+	case "anthropic":
+		if model == "" {
+			model = "claude-sonnet-4-6"
+		}
+		return callAnthropic(key, model, systemPrompt, finalPrompt)
 	default:
 		return "", fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -116,6 +126,67 @@ func callLLM(apiKey, model, url, sysPrompt, userPrompt, provider string) (string
 			return "", fmt.Errorf("openai response had no choices (raw=%q)", truncate(string(b), 256))
 		}
 		return res.Choices[0].Message.Content, nil
+	})
+}
+
+func callGemini(apiKey, model, sysPrompt, userPrompt string) (string, error) {
+	url := "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey
+	payload := map[string]interface{}{
+		"system_instruction": map[string]interface{}{"parts": map[string]string{"text": sysPrompt}},
+		"contents":           []map[string]interface{}{{"parts": []map[string]string{{"text": userPrompt}}}},
+		"generationConfig":   map[string]interface{}{"temperature": 0.5},
+	}
+	req, err := buildJSONRequest(http.MethodPost, url, payload)
+	if err != nil {
+		return "", err
+	}
+	return executeRequest(req, "gemini", func(b []byte) (string, error) {
+		var res struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+		if err := json.Unmarshal(b, &res); err != nil {
+			return "", fmt.Errorf("gemini response decode: %w (raw=%q)", err, truncate(string(b), 256))
+		}
+		if len(res.Candidates) == 0 || len(res.Candidates[0].Content.Parts) == 0 {
+			return "", fmt.Errorf("gemini response had no candidates/parts (raw=%q)", truncate(string(b), 256))
+		}
+		return res.Candidates[0].Content.Parts[0].Text, nil
+	})
+}
+
+func callAnthropic(apiKey, model, sysPrompt, userPrompt string) (string, error) {
+	payload := map[string]interface{}{
+		"model":       model,
+		"max_tokens":  1500,
+		"system":      sysPrompt,
+		"messages":    []map[string]string{{"role": "user", "content": userPrompt}},
+		"temperature": 0.5,
+	}
+	req, err := buildJSONRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", payload)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	return executeRequest(req, "anthropic", func(b []byte) (string, error) {
+		var res struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(b, &res); err != nil {
+			return "", fmt.Errorf("anthropic response decode: %w (raw=%q)", err, truncate(string(b), 256))
+		}
+		if len(res.Content) == 0 {
+			return "", fmt.Errorf("anthropic response had empty content (raw=%q)", truncate(string(b), 256))
+		}
+		return res.Content[0].Text, nil
 	})
 }
 
