@@ -21,12 +21,23 @@ func RegisterHandlers(mux *http.ServeMux, mgr *config.Manager) {
 
 	mux.HandleFunc("/console", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		tmpl.ExecuteTemplate(w, "layout.html", map[string]string{"Page": "dashboard"})
+		if err := tmpl.ExecuteTemplate(w, "layout.html", map[string]string{"Page": "dashboard"}); err != nil {
+			http.Error(w, "Template Render Error: "+err.Error(), http.StatusInternalServerError)
+		}
 	})
 
 	mux.HandleFunc("/console/docs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		tmpl.ExecuteTemplate(w, "layout.html", map[string]string{"Page": "docs"})
+		if err := tmpl.ExecuteTemplate(w, "layout.html", map[string]string{"Page": "docs"}); err != nil {
+			http.Error(w, "Template Render Error: "+err.Error(), http.StatusInternalServerError)
+		}
+	})
+
+	mux.HandleFunc("/console/builder", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.ExecuteTemplate(w, "layout.html", map[string]string{"Page": "builder"}); err != nil {
+			http.Error(w, "Template Render Error: "+err.Error(), http.StatusInternalServerError)
+		}
 	})
 
 	mux.HandleFunc("/console/api/dashboard", func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +64,9 @@ func RegisterHandlers(mux *http.ServeMux, mgr *config.Manager) {
 			"Policies":    policies,
 		}
 
-		tmpl.ExecuteTemplate(w, "dashboard_content", data)
+		if err := tmpl.ExecuteTemplate(w, "dashboard_content", data); err != nil {
+			http.Error(w, "Dashboard Component Render Error: "+err.Error(), http.StatusInternalServerError)
+		}
 	})
 
 	mux.HandleFunc("/console/api/chart", func(w http.ResponseWriter, r *http.Request) {

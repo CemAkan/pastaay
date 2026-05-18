@@ -1,41 +1,65 @@
 {{ define "docs_content" }}
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
 
 <div class="flex h-full gap-6">
     <div class="w-64 bg-gray-800 border border-gray-700 rounded-lg p-4 h-fit">
         <h3 class="text-lg font-bold text-gray-200 mb-4 border-b border-gray-700 pb-2">Documents</h3>
         <ul class="space-y-2 text-sm font-mono" id="doc-list">
-            <li><a href="#" onclick="loadDoc('architecture.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">architecture.md</a></li>
-            <li><a href="#" onclick="loadDoc('configuration.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">configuration.md</a></li>
-            <li><a href="#" onclick="loadDoc('operator.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">operator.md</a></li>
-            <li><a href="#" onclick="loadDoc('pastaayctl.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">pastaayctl.md</a></li>
-            <li><a href="#" onclick="loadDoc('remote_control.md')" class="text-cyan-400 hover:text-white transition-colors block py-1">remote_control.md</a></li>
+            <li><a href="#" onclick="loadDoc('index.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">🏠 Home</a></li>
+            <li><a href="#" onclick="loadDoc('architecture.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">architecture.md</a></li>
+            <li><a href="#" onclick="loadDoc('configuration.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">configuration.md</a></li>
+            <li><a href="#" onclick="loadDoc('operator.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">operator.md</a></li>
+            <li><a href="#" onclick="loadDoc('pastaayctl.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">pastaayctl.md</a></li>
+            <li><a href="#" onclick="loadDoc('remote_control.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">remote_control.md</a></li>
+            <li><a href="#" onclick="loadDoc('web_console.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">web_console.md</a></li>
         </ul>
     </div>
 
     <div class="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-8 overflow-y-auto">
-        <div id="md-viewer" class="prose prose-invert max-w-none">
+        <div id="md-viewer" class="prose prose-invert max-w-none relative">
             <p class="text-gray-400 animate-pulse font-mono">Select a document to read...</p>
         </div>
     </div>
 </div>
 
 <script>
-    // Syntax Highlight
-    marked.setOptions({
-        highlight: function(code, lang) {
-            if (lang && hljs.getLanguage(lang)) {
-                return hljs.highlight(code, { language: lang }).value;
+    document.addEventListener("DOMContentLoaded", function() {
+        mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+
+        const renderer = new marked.Renderer();
+        const originalCodeRenderer = renderer.code.bind(renderer);
+        renderer.code = function(code, language, isEscaped) {
+            if (language === 'mermaid') {
+                return '<div class="mermaid-container" title="Click to Expand / Collapse"><div class="mermaid">\n' + code + '\n</div></div>';
             }
-            return hljs.highlightAuto(code).value;
-        }
+            return originalCodeRenderer(code, language, isEscaped);
+        };
+
+        marked.setOptions({
+            renderer: renderer,
+            highlight: function(code, lang) {
+                if (lang && lang !== 'mermaid' && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            }
+        });
+
+        document.getElementById('md-viewer').addEventListener('click', function(e) {
+            let container = e.target.closest('.mermaid-container');
+            if (container) {
+                container.classList.toggle('mermaid-fullscreen');
+            }
+        });
+
+        loadDoc('index.md');
     });
 
     function loadDoc(filename) {
         document.getElementById('md-viewer').innerHTML = '<p class="text-cyan-400 animate-pulse font-mono">Reading ' + filename + ' from engine memory...</p>';
-
 
         fetch('/console/docs/raw/' + filename)
             .then(response => {
@@ -43,18 +67,17 @@
                 return response.text();
             })
             .then(text => {
-
                 text = text.replace(/src="assets\//g, 'src="/console/docs/raw/assets/');
                 text = text.replace(/src="\.\.\/\.\.\/docs\/assets\//g, 'src="/console/docs/raw/assets/');
 
                 document.getElementById('md-viewer').innerHTML = marked.parse(text);
+
+                mermaid.run({ querySelector: '.mermaid' }).catch(err => console.error("Mermaid Render Error:", err));
             })
             .catch(err => {
                 document.getElementById('md-viewer').innerHTML = '<p class="text-red-400 font-mono">Error: ' + err.message + '</p>';
             });
     }
-
-    window.onload = () => loadDoc('architecture.md');
 </script>
 
 <style>
@@ -74,5 +97,51 @@
     .prose th { background-color: #1f2937; font-weight: 600; color: #d1d5db; }
     .prose blockquote { border-left: 4px solid #4b5563; padding-left: 1rem; color: #9ca3af; font-style: italic; margin-bottom: 1.25rem; }
     .prose img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 1rem 0; }
+
+    /* YENİ: Mermaid Zoom & Tam Ekran Efektleri */
+    .mermaid-container {
+        cursor: zoom-in;
+        background-color: #1f2937; /* bg-gray-800 */
+        border: 1px solid #374151;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        overflow-x: auto;
+        text-align: center;
+        transition: all 0.3s ease;
+    }
+    .mermaid-container:hover {
+        border-color: #06b6d4; /* Neon cyan */
+        box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
+    }
+    .mermaid-fullscreen {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        background-color: rgba(17, 24, 39, 0.96) !important; /* Koyu saydam arkaplan */
+        z-index: 9999 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 2rem !important;
+        cursor: zoom-out !important;
+        border: none !important;
+        border-radius: 0 !important;
+    }
+    .mermaid-fullscreen .mermaid {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .mermaid-fullscreen svg {
+        max-width: 95vw !important;
+        max-height: 95vh !important;
+        width: auto !important;
+        height: auto !important;
+    }
 </style>
 {{ end }}

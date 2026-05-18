@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pastaay | Command Center</title>
+    <link rel="icon" type="image/png" href="/console/docs/raw/assets/favicon.png">
+
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,12 +14,13 @@
 <div class="flex h-screen overflow-hidden">
 
     <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
-        <div class="p-4 border-b border-gray-700">
-            <h1 class="text-xl font-bold text-green-400">Pastaay</h1>
-            <p class="text-xs text-gray-400">v2.3 Command Center</p>
+        <div class="p-4 border-b border-gray-700 flex flex-col items-center">
+            <img src="/console/docs/raw/assets/pastaay_logo.png" alt="Pastaay Engine" class="w-48 mb-2">
+            <p class="text-xs text-gray-400 tracking-widest uppercase">Command Center</p>
         </div>
         <nav class="flex-1 p-4 space-y-2">
             <a href="/console" class="block px-4 py-2 rounded {{ if eq .Page "dashboard" }}bg-gray-700 text-white{{ else }}text-gray-400 hover:bg-gray-700 hover:text-white{{ end }}">Dashboard</a>
+            <a href="/console/builder" class="block px-4 py-2 rounded {{ if eq .Page "builder" }}bg-gray-700 text-white border-l-2 border-red-500{{ else }}text-gray-400 hover:bg-gray-700 hover:text-white{{ end }}">Visual Builder</a>
             <a href="/console/docs" class="block px-4 py-2 rounded {{ if eq .Page "docs" }}bg-gray-700 text-white{{ else }}text-gray-400 hover:bg-gray-700 hover:text-white{{ end }}">Documentation</a>
         </nav>
     </aside>
@@ -27,6 +30,8 @@
         {{ template "content" . }}
         {{ else if eq .Page "docs" }}
         {{ template "docs_content" . }}
+        {{ else if eq .Page "builder" }}
+        {{ template "builder_content" . }}
         {{ end }}
     </main>
 
