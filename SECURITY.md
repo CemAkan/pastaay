@@ -23,7 +23,7 @@ Pastaay is designed to operate within highly sensitive production microservices.
 
 **Do not open public GitHub issues for security vulnerabilities.**
 
-If a security vulnerability is discovered within the Pastaay Chaos Engine or Kubernetes Operator, please report it privately by emailing the maintainer directly at **cemakan@cukurova.edu.tr**.
+If a security vulnerability is discovered within the Pastaay Chaos Engine or Kubernetes Operator, please report it privately by emailing the maintainer directly at **mail@akancem.com**.
 
 Please include:
 1. A detailed description of the vulnerability and the potential exploit vector.
