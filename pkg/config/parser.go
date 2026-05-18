@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -19,4 +20,10 @@ func LoadConfig(filePath string) (*PastaayConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+func decodeOrWarn(p *Policy, field string, node yaml.Node, dst interface{}) {
+	if err := node.Decode(dst); err != nil {
+		log.Printf("[WARN] policy %q: %s decode error: %v", p.Name, field, err)
+	}
 }
