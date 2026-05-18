@@ -31,6 +31,7 @@ import (
 	"github.com/CemAkan/pastaay/pkg/ritual"
 	"github.com/CemAkan/pastaay/pkg/sqlchaos"
 	"github.com/CemAkan/pastaay/pkg/tracing"
+	"github.com/CemAkan/pastaay/web"
 )
 
 type brokerAdapter struct {
@@ -87,6 +88,8 @@ func main() {
 
 	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(webhookToken, cfgManager.Update))
 	adminMux.HandleFunc("/chaos/export", config.ExportHandler(cfgManager))
+
+	web.RegisterHandlers(adminMux)
 
 	go func() {
 		log.Println("[INFO] Pastaay Admin Server listening on :2112")
