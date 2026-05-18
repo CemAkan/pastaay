@@ -1,56 +1,119 @@
 {{ define "content" }}
 <div hx-get="/console/api/dashboard" hx-trigger="load, every 2s" hx-swap="innerHTML">
-    <div class="flex items-center justify-center h-64">
-        <p class="text-cyan-400 animate-pulse font-mono">Establishing neural link with Pastaay Engine...</p>
+    <div class="flex items-center justify-center h-24">
+        <p class="text-cyan-400 animate-pulse font-mono">Synchronizing telemetry...</p>
     </div>
 </div>
 
-<h2 class="text-xl font-semibold mt-8 mb-4 text-gray-200">Kinetic Impact (Faults Injected)</h2>
-<div class="bg-gray-800 p-4 rounded shadow border border-gray-700">
-    <div id="impact-chart" style="width: 100%; height: 350px;"></div>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6 mb-8">
+    <div class="bg-gray-800 p-4 rounded shadow border border-gray-700 col-span-1 flex flex-col items-center">
+        <h3 class="text-gray-400 text-sm font-mono mb-2">Live Resilience Score</h3>
+        <div id="resilience-gauge" style="width: 100%; height: 250px;"></div>
+
+        <div class="w-full mt-4 px-4 bg-gray-900 p-3 rounded border border-gray-700">
+            <div class="flex justify-between mb-1">
+                <label class="text-xs text-cyan-400 font-mono">App Traffic (Tr)</label>
+                <span id="traffic-val" class="text-white font-bold text-xs">100 req/s</span>
+            </div>
+            <input type="range" id="traffic-slider" min="10" max="5000" step="10" value="100" class="w-full accent-cyan-500" oninput="document.getElementById('traffic-val').innerText = this.value + ' req/s'">
+        </div>
+    </div>
+
+    <div class="bg-gray-800 p-4 rounded shadow border border-gray-700 col-span-2">
+        <h3 class="text-gray-400 text-sm font-mono mb-2">Kinetic Impact (Injected Faults)</h3>
+        <div id="impact-chart" style="width: 100%; height: 320px;"></div>
+    </div>
 </div>
 
 <script>
     document.addEventListener("DOMContentLoaded", function() {
-        var chartDom = document.getElementById('impact-chart');
-        if (chartDom) {
-            // darh theme
-            var myChart = echarts.init(chartDom, 'dark', { backgroundColor: 'transparent' });
-            var option = {
-                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-                grid: { left: '3%', right: '5%', bottom: '3%', containLabel: true },
-                xAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151', type: 'dashed' } } },
-                yAxis: { type: 'category', data: [], axisLabel: { color: '#9CA3AF', fontFamily: 'monospace' } },
-                series: [{
-                    name: 'Total Faults',
-                    type: 'bar',
-                    itemStyle: { color: '#ef4444', borderRadius: [0, 4, 4, 0] },
-                    data: []
-                }]
-            };
-            myChart.setOption(option);
+        var barChart = echarts.init(document.getElementById('impact-chart'), 'dark', { backgroundColor: 'transparent' });
+        var gaugeChart = echarts.init(document.getElementById('resilience-gauge'), 'dark', { backgroundColor: 'transparent' });
 
-            setInterval(() => {
-                fetch('/console/api/chart')
-                    .then(res => res.json())
-                    .then(data => {
-                        if(data.labels && data.values) {
-                            myChart.setOption({
-                                yAxis: { data: data.labels },
-                                series: [{ data: data.values }]
-                            });
-                        }
-                    })
-                    .catch(err => console.error("Metrics fetch error:", err));
-            }, 2000);
+        barChart.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: '3%', right: '5%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151', type: 'dashed' } } },
+            yAxis: { type: 'category', data: [], axisLabel: { color: '#9CA3AF', fontFamily: 'monospace' } },
+            series: [{ name: 'Faults', type: 'bar', itemStyle: { color: '#ef4444', borderRadius: [0, 4, 4, 0] }, data: [] }]
+        });
 
-            // screen resize handling
-            window.addEventListener('resize', function() { myChart.resize(); });
-        }
+        gaugeChart.setOption({
+            series: [{
+                type: 'gauge',
+                startAngle: 180, endAngle: 0, min: 0, max: 100,
+                pointer: { show: true },
+                progress: { show: true, overlap: false, roundCap: true, clip: false },
+                axisLine: { lineStyle: { width: 15 } },
+                splitLine: { show: false },
+                axisTick: { show: false },
+                axisLabel: { show: false },
+                detail: { width: 50, height: 14, fontSize: 32, color: 'auto', formatter: '{value}' },
+                data: [{ value: 100, name: 'Score' }]
+            }]
+        });
+
+        let lastMetrics = {};
+        let lastTime = Date.now();
+
+        setInterval(() => {
+            fetch('/console/api/chart')
+                .then(res => res.json())
+                .then(data => {
+                    if (!data) return;
+
+                    let now = Date.now();
+                    let deltaSec = (now - lastTime) / 1000.0;
+                    lastTime = now;
+
+                    let errorRate = 0;
+                    let latencyRate = 0;
+
+                    let targets = {};
+
+                    data.forEach(m => {
+                        let key = m.target + "_" + m.type;
+                        let currentVal = m.value;
+                        let prevVal = lastMetrics[key] !== undefined ? lastMetrics[key] : currentVal;
+                        let rate = Math.max(0, (currentVal - prevVal) / deltaSec);
+                        lastMetrics[key] = currentVal;
+
+                        if (m.type === "error" || m.type === "drop") errorRate += rate;
+                        if (m.type === "latency") latencyRate += rate;
+
+                        targets[m.target] = (targets[m.target] || 0) + currentVal;
+                    });
+
+                    // Resilience Score Calculation
+                    let tr = parseFloat(document.getElementById('traffic-slider').value);
+                    let penalty = ((1.5 * errorRate) + (0.5 * latencyRate)) / tr;
+                    let score = (1.0 - penalty) * 100;
+
+                    score = Math.max(0, Math.min(100, score));
+
+                    let color = '#22c55e';
+                    if (score < 50) color = '#ef4444';
+                    else if (score < 80) color = '#eab308';
+
+                    gaugeChart.setOption({
+                        series: [{
+                            data: [{ value: score.toFixed(1) }],
+                            progress: { itemStyle: { color: color } },
+                            detail: { color: color }
+                        }]
+                    });
+
+                    let labels = Object.keys(targets);
+                    let values = Object.values(targets);
+                    barChart.setOption({ yAxis: { data: labels }, series: [{ data: values }] });
+                })
+                .catch(err => console.error("Metrics fetch error:", err));
+        }, 2000);
+
+        window.addEventListener('resize', function() { barChart.resize(); gaugeChart.resize(); });
     });
 </script>
 {{ end }}
-
 
 {{ define "dashboard_content" }}
 <div>
@@ -97,10 +160,17 @@
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-cyan-400 font-mono">{{ .Type }}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{{ .Target }}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-red-400">
-                    {{ if .DropConnection }} ⚡ Drop Connection
-                    {{ else if gt .ErrorChance 0.0 }} ✘ Error ({{ .ErrorCode }})
-                    {{ else if gt .LatencyChance 0.0 }} ⏱ Latency ({{ .LatencyDuration }})
-                    {{ else }} ⚔ Resource Sabotage
+                    {{ if .DropConnection }}
+                    <span class="block">⚡ Drop Connection</span>
+                    {{ end }}
+                    {{ if gt .ErrorChance 0.0 }}
+                    <span class="block">✘ Error ({{ .ErrorCode }})</span>
+                    {{ end }}
+                    {{ if gt .LatencyChance 0.0 }}
+                    <span class="block">⏱ Latency ({{ .LatencyDuration }})</span>
+                    {{ end }}
+                    {{ if eq .Type "resource" }}
+                    <span class="block">⚔ Resource Sabotage</span>
                     {{ end }}
                 </td>
             </tr>

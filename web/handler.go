@@ -78,27 +78,33 @@ func RegisterHandlers(mux *http.ServeMux, mgr *config.Manager) {
 			return
 		}
 
-		labels := []string{}
-		values := []int{}
+		type metricData struct {
+			Target string `json:"target"`
+			Type   string `json:"type"`
+			Value  int    `json:"value"`
+		}
+		var metricsList []metricData
 
 		for _, mf := range mfs {
 			if mf.GetName() == "pastaay_injected_faults_total" {
 				for _, m := range mf.GetMetric() {
-					var target string
+					var target, fType string
 					for _, lp := range m.GetLabel() {
 						if lp.GetName() == "target" {
 							target = lp.GetValue()
+						} else if lp.GetName() == "fault_type" {
+							fType = lp.GetValue()
 						}
 					}
-					labels = append(labels, target)
-					values = append(values, int(m.GetCounter().GetValue()))
+					metricsList = append(metricsList, metricData{
+						Target: target,
+						Type:   fType,
+						Value:  int(m.GetCounter().GetValue()),
+					})
 				}
 			}
 		}
 
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"labels": labels,
-			"values": values,
-		})
+		json.NewEncoder(w).Encode(metricsList)
 	})
 }

@@ -40,7 +40,6 @@ func init() {
 }
 
 func runExperiment(cmd *cobra.Command, args []string) {
-	// Signal trapping
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -52,24 +51,20 @@ func runExperiment(cmd *cobra.Command, args []string) {
 			healthURL = strings.Replace(targetURL, ":2112/metrics", ":8080/api/v1/ping", 1)
 		} else {
 			fmt.Printf("\n%s[!] FATAL: Custom target detected. You MUST provide a valid health check endpoint in production!%s\n", cRed, cReset)
-			fmt.Printf("%s[!] Example: pastaayctl run %s --target %s --health-url http://api.com/health (REQUIRES EXPLICIT HEALTH URL LOGIC)%s\n", cGray, args[0], targetURL, cReset)
 			os.Exit(1)
 		}
 	}
 
-	// Pre-Flight Check
-	if ok, _ := probe(healthURL); !ok {
+	if ok, _, _ := probe(healthURL); !ok {
 		fmt.Printf("%s[!] ABORTED: System is already unhealthy or health URL is unreachable.%s\n", cRed, cReset)
 		return
 	}
 
-	// Rollback
 	defer func() {
 		fmt.Printf("\n%s[*] Finalizing: Triggering Atomic Rollback...%s\n", cCyan, cReset)
 		runRollback(nil, nil)
 	}()
 
-	// Inject Chaos
 	content, err := os.ReadFile(args[0])
 	if err != nil {
 		fmt.Printf("\n%s[!] ABORTED: Failed to read policy file: %v%s\n", cRed, err, cReset)
@@ -78,30 +73,41 @@ func runExperiment(cmd *cobra.Command, args []string) {
 
 	dispatch(content)
 
-	// Probing Loop
 	ticker := time.NewTicker(expInterval)
 	defer ticker.Stop()
-
 	expTimer := time.NewTimer(expDuration)
 	defer expTimer.Stop()
 
+	var totalProbes, errorCount, latencyCount float64
+	alpha, beta := 1.5, 0.5 // Penalty weights
 	failures, start := 0, time.Now()
+
 	for {
 		select {
 		case <-ctx.Done():
 			fmt.Println("\n" + cYellow + "[!] Interrupted by operator." + cReset)
+			printResilienceScore(totalProbes, errorCount, latencyCount, alpha, beta)
 			return
 		case <-expTimer.C:
-			fmt.Printf("\n%s[+] SUCCESS: System survived the experiment.%s\n", cGreen, cReset)
+			fmt.Printf("\n\n%s[+] SUCCESS: System survived the experiment.%s\n", cGreen, cReset)
+			printResilienceScore(totalProbes, errorCount, latencyCount, alpha, beta)
 			return
 		case <-ticker.C:
-			ok, latency := probe(healthURL)
+			totalProbes++
+			ok, latency, isError := probe(healthURL)
+
+			if isError {
+				errorCount++
+			} else if latency > maxLatency {
+				latencyCount++
+			}
+
 			if !ok || latency > maxLatency {
 				failures++
 				fmt.Printf("\n%s[!] Degraded Performance (%v) [%d/%d]%s", cRed, latency.Round(time.Millisecond), failures, failThreshold, cReset)
 				if failures >= failThreshold {
 					fmt.Printf("\n%s[!!!] SLA BREACHED: Emergency shutdown triggered.%s\n", cBold+cRed, cReset)
-
+					printResilienceScore(totalProbes, errorCount, latencyCount, alpha, beta)
 					runRollback(nil, nil)
 					os.Exit(1)
 				}
@@ -113,21 +119,52 @@ func runExperiment(cmd *cobra.Command, args []string) {
 	}
 }
 
-func probe(url string) (bool, time.Duration) {
+// Resilience Score
+func printResilienceScore(total, errs, lats, alpha, beta float64) {
+	if total == 0 {
+		return
+	}
+
+	penalty := ((alpha * errs) + (beta * lats)) / total
+	score := (1.0 - penalty) * 100
+
+	if score < 0 {
+		score = 0
+	} else if score > 100 {
+		score = 100
+	}
+
+	grade, color := "A+", cGreen
+	if score < 50 {
+		grade, color = "F (Critical Failure)", cRed
+	} else if score < 75 {
+		grade, color = "C (Degraded)", cYellow
+	} else if score < 90 {
+		grade, color = "B (Stable)", cCyan
+	}
+
+	fmt.Printf("\n%s═══ POST-MORTEM RESILIENCE ANALYSIS ═══%s\n", cBold+cPurple, cReset)
+	fmt.Printf("Total Probes    : %.0f\n", total)
+	fmt.Printf("Error Count (Er): %.0f (Penalty x%.1f)\n", errs, alpha)
+	fmt.Printf("Latency (Lr)    : %.0f (Penalty x%.1f)\n", lats, beta)
+	fmt.Printf("Final Score     : %s%.2f / 100 [%s]%s\n\n", color, score, grade, cReset)
+}
+
+func probe(url string) (bool, time.Duration, bool) {
 	client := http.Client{Timeout: 2 * time.Second}
 	start := time.Now()
 	resp, err := client.Get(url)
 
 	if err != nil {
-		return false, time.Since(start)
+		return false, time.Since(start), true
 	}
 
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 500 {
-		return false, time.Since(start)
+		return false, time.Since(start), true
 	}
 
-	return true, time.Since(start)
+	return true, time.Since(start), false
 }

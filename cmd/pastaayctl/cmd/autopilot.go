@@ -49,7 +49,6 @@ func runAutopilot(cmd *cobra.Command, args []string) {
 			healthURL = strings.Replace(targetURL, ":2112/metrics", ":8080/api/v1/ping", 1)
 		} else {
 			fmt.Printf("\n%s[!] FATAL: Custom target detected. You MUST provide a valid health check endpoint in production!%s\n", cRed, cReset)
-			fmt.Printf("%s[!] Example: pastaayctl autopilot --target %s --health-url http://api.com/health (REQUIRES EXPLICIT HEALTH URL LOGIC)%s\n", cGray, targetURL, cReset)
 			os.Exit(1)
 		}
 	}
@@ -61,6 +60,10 @@ func runAutopilot(cmd *cobra.Command, args []string) {
 		fmt.Printf("\n%s[*] Autopilot shutting down. Cleaning active policies...%s\n", cCyan, cReset)
 		runRollback(nil, nil)
 	}()
+
+	// Metrics for resilience scoring
+	var totalProbes, errorCount, latencyCount float64
+	alpha, beta := 1.5, 0.5
 
 	for currentChance <= autoLimit {
 		fmt.Printf("\n%s%s[ CYCLE ]%s Scaling error chance to %s%.0f%%%s\n", cBold, cGray, cReset, cYellow, currentChance*100, cReset)
@@ -86,11 +89,19 @@ func runAutopilot(cmd *cobra.Command, args []string) {
 		case <-ctx.Done():
 			waitTimer.Stop()
 			fmt.Printf("\n%s[!] Operator Aborted Autopilot.%s\n", cRed, cReset)
+			printResilienceScore(totalProbes, errorCount, latencyCount, alpha, beta)
 			return
 		case <-waitTimer.C:
 		}
 
-		ok, latency := probe(healthURL)
+		ok, latency, isError := probe(healthURL)
+		totalProbes++
+
+		if isError {
+			errorCount++
+		} else if latency > 400*time.Millisecond {
+			latencyCount++
+		}
 
 		if !ok || latency > 400*time.Millisecond {
 			fmt.Printf("%s[SLA BREACHED]%s\n", cRed, cReset)
@@ -99,6 +110,7 @@ func runAutopilot(cmd *cobra.Command, args []string) {
 			fmt.Printf("Critical Load: %.0f%%\nRecovery: Initiated\n", currentChance*100)
 
 			recordStrike("autopilot", "ramp-test", "FAILED")
+			printResilienceScore(totalProbes, errorCount, latencyCount, alpha, beta)
 
 			runRollback(nil, nil)
 			os.Exit(1)
@@ -112,4 +124,5 @@ func runAutopilot(cmd *cobra.Command, args []string) {
 	fmt.Printf("Total Duration: %v\n", time.Since(startTime).Round(time.Second))
 
 	recordStrike("autopilot", "ramp-test", "SUCCESS")
+	printResilienceScore(totalProbes, errorCount, latencyCount, alpha, beta)
 }
