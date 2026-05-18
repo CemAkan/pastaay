@@ -4,7 +4,53 @@
         <p class="text-cyan-400 animate-pulse font-mono">Establishing neural link with Pastaay Engine...</p>
     </div>
 </div>
+
+<h2 class="text-xl font-semibold mt-8 mb-4 text-gray-200">Kinetic Impact (Faults Injected)</h2>
+<div class="bg-gray-800 p-4 rounded shadow border border-gray-700">
+    <div id="impact-chart" style="width: 100%; height: 350px;"></div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        var chartDom = document.getElementById('impact-chart');
+        if (chartDom) {
+            // darh theme
+            var myChart = echarts.init(chartDom, 'dark', { backgroundColor: 'transparent' });
+            var option = {
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                grid: { left: '3%', right: '5%', bottom: '3%', containLabel: true },
+                xAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151', type: 'dashed' } } },
+                yAxis: { type: 'category', data: [], axisLabel: { color: '#9CA3AF', fontFamily: 'monospace' } },
+                series: [{
+                    name: 'Total Faults',
+                    type: 'bar',
+                    itemStyle: { color: '#ef4444', borderRadius: [0, 4, 4, 0] },
+                    data: []
+                }]
+            };
+            myChart.setOption(option);
+
+            setInterval(() => {
+                fetch('/console/api/chart')
+                    .then(res => res.json())
+                    .then(data => {
+                        if(data.labels && data.values) {
+                            myChart.setOption({
+                                yAxis: { data: data.labels },
+                                series: [{ data: data.values }]
+                            });
+                        }
+                    })
+                    .catch(err => console.error("Metrics fetch error:", err));
+            }, 2000);
+
+            // screen resize handling
+            window.addEventListener('resize', function() { myChart.resize(); });
+        }
+    });
+</script>
 {{ end }}
+
 
 {{ define "dashboard_content" }}
 <div>
@@ -54,7 +100,7 @@
                     {{ if .DropConnection }} ⚡ Drop Connection
                     {{ else if gt .ErrorChance 0.0 }} ✘ Error ({{ .ErrorCode }})
                     {{ else if gt .LatencyChance 0.0 }} ⏱ Latency ({{ .LatencyDuration }})
-                    {{ else }} ঌ Resource Sabotage
+                    {{ else }} ⚔ Resource Sabotage
                     {{ end }}
                 </td>
             </tr>

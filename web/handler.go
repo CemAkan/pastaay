@@ -1,10 +1,12 @@
 package web
 
 import (
+	"encoding/json"
 	"html/template"
 	"net/http"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // RegisterHandlers mounts the embedded Web Console routes to the Engine's mux.
@@ -44,5 +46,38 @@ func RegisterHandlers(mux *http.ServeMux, mgr *config.Manager) {
 		}
 
 		tmpl.ExecuteTemplate(w, "dashboard_content", data)
+	})
+	
+	mux.HandleFunc("/console/api/chart", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		if err != nil {
+			http.Error(w, "{}", http.StatusInternalServerError)
+			return
+		}
+
+		labels := []string{}
+		values := []int{}
+
+		for _, mf := range mfs {
+			if mf.GetName() == "pastaay_injected_faults_total" {
+				for _, m := range mf.GetMetric() {
+					var target string
+					for _, lp := range m.GetLabel() {
+						if lp.GetName() == "target" {
+							target = lp.GetValue()
+						}
+					}
+					labels = append(labels, target)
+					values = append(values, int(m.GetCounter().GetValue()))
+				}
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"labels": labels,
+			"values": values,
+		})
 	})
 }
