@@ -20,5 +20,5 @@ In enterprise environments, executing chaos strikes manually via CLI is risky an
 <br>
 
 <p align="center">
-  <img src="../../docs/assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+  <img src="../../docs/assets/common_footer.gif" alt="Pastaay Bottom Banner">
 </p>

@@ -35,5 +35,5 @@ Reports will be acknowledged within 48 hours, followed by a coordinated disclosu
 <br>
 
 <p align="center">
-  <img src="docs/assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+  <img src="docs/assets/common_footer.gif" alt="Pastaay Bottom Banner">
 </p>

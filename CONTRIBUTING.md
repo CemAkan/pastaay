@@ -106,5 +106,5 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/). This hel
 <br>
 
 <p align="center">
-  <img src="docs/assets/contributing_bottom.gif" alt="Contributing Bottom">
+  <img src="docs/assets/contributing_footer.gif" alt="Contributing Bottom">
 </p>

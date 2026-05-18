@@ -190,6 +190,6 @@ kubectl delete chaospolicy redis-cache-jitter
 <br>
 
 <p align="center">
-  <img src="assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+  <img src="assets/common_footer.gif" alt="Pastaay Bottom Banner">
 </p>
 
