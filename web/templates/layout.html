@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pastaay | Command Center</title>
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans antialiased">
+<div class="flex h-screen overflow-hidden">
+
+<aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
+<div class="p-4 border-b border-gray-700">
+<h1 class="text-xl font-bold text-green-400">Pastaay</h1>
+<p class="text-xs text-gray-400">v2.3 Command Center</p>
+</div>
+<nav class="flex-1 p-4 space-y-2">
+<a href="#" class="block px-4 py-2 rounded bg-gray-700 text-white">Dashboard</a>
+<a href="#" class="block px-4 py-2 rounded text-gray-400 hover:bg-gray-700 hover:text-white">Active Policies</a>
+<a href="#" class="block px-4 py-2 rounded text-gray-400 hover:bg-gray-700 hover:text-white">Documentation</a>
+</nav>
+</aside>
+
+<main class="flex-1 overflow-y-auto p-8" id="main-content">
+{{ template "content" . }}
+</main>
+
+</div>
+</body>
+</html>
