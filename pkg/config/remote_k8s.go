@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 const (
 	k8sTokenPath     = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	k8sNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	k8sCAPath        = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 	k8sHost          = "kubernetes.default.svc"
 )
 
@@ -44,17 +46,34 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 		return fmt.Errorf("k8s namespace missing: %w", err)
 	}
 
+	caCert, err := os.ReadFile(k8sCAPath)
+	if err != nil {
+		mgr.SetSensorStatus("k8s", "ca_missing")
+		log.Printf("[Pastaay-K8s] FATAL: cannot read service account CA: %v", err)
+		return fmt.Errorf("k8s CA missing: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caCert) {
+		mgr.SetSensorStatus("k8s", "ca_invalid")
+		return fmt.Errorf("pastaay: invalid in-cluster CA bundle")
+	}
+
 	url := fmt.Sprintf("https://%s/api/v1/namespaces/%s/configmaps/%s", k8sHost, strings.TrimSpace(string(ns)), cmName)
 	mgr.SetSensorStatus("k8s", "initializing")
 
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{
+			RootCAs:    pool,
+			MinVersion: tls.VersionTLS12,
+		},
 		DialContext: (&net.Dialer{
 			Timeout:   5 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		ResponseHeaderTimeout: 5 * time.Second,
 		IdleConnTimeout:       60 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		MaxIdleConns:          10,
 	}
 
 	client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
@@ -98,8 +117,6 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 
 				var cm k8sConfigMap
 				err = json.NewDecoder(io.LimitReader(resp.Body, 5<<20)).Decode(&cm)
-
-				io.Copy(io.Discard, io.LimitReader(resp.Body, 1024*1024))
 				resp.Body.Close()
 
 				if err != nil {
