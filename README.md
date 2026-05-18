@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v2.2.0-stable.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v2.3.0-stable.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
@@ -73,12 +73,11 @@ Pastaay is built to survive high-throughput data streams. Our core evaluator gua
 
 Pastaay is a continuously evolving enterprise chaos engineering suite. Our development phases are strictly focused on cloud-native scalability and GitOps integrations.
 
-| Phase | Theme | Architecture Goals |
-| :--- | :--- | :--- |
-| **Current (v2.2)** | **Observability AI** | The Pastaay Oracle. Machine learning integration to analyze span throughput and health telemetry to autonomously suggest optimal blast radius configurations. |
-| **Next (v2.3)** | **Web Console** | Centralized web dashboard for direct fleet management, visual impact analysis, and interactive documentation. |
-| **Future** | **CEL-Driven Rule Engine** | **Dynamic Evaluation:** Integrating Google's Common Expression Language (CEL) to allow complex, AST-compiled conditional chaos rules (e.g., payload limits, header regex) with zero-allocation overhead. |
-| **Future** | **Trace-Aware Injection** | **Context-Propagated Chaos:** Leveraging OpenTelemetry Baggage to inject faults based on the complete distributed request journey, targeting specific end-to-end transaction flows across the fleet. |
+| Phase              | Theme | Architecture Goals |
+|:-------------------| :--- | :--- |
+| **Current (v2.3)** | **Web Console** | Centralized web dashboard for direct fleet management, visual impact analysis, and interactive documentation. |
+| **Next**           | **CEL-Driven Rule Engine** | **Dynamic Evaluation:** Integrating Google's Common Expression Language (CEL) to allow complex, AST-compiled conditional chaos rules (e.g., payload limits, header regex) with zero-allocation overhead. |
+| **Future**         | **Trace-Aware Injection** | **Context-Propagated Chaos:** Leveraging OpenTelemetry Baggage to inject faults based on the complete distributed request journey, targeting specific end-to-end transaction flows across the fleet. |
 
 ## Documentation
 
@@ -89,6 +88,7 @@ Dive deep into Pastaay's mechanics using our official documentation:
 * [pastaayctl: Kinetic Control Plane Reference](docs/pastaayctl.md) - Master the CLI to orchestrate fleet-wide chaos, run SLA-guarded autopilot experiments, and monitor real-time kinetic impact.
 * [Pastaay Kubernetes Operator](docs/operator.md) - Learn how to deploy the operator and manage chaos natively using Kubernetes CRDs.
 * [GitOps & CI/CD Integrations](examples/gitops/README.md) - Reference architectures for declarative chaos management via ArgoCD and pipeline automation.
+* [Web Console](docs/web_console.md) - Explore the centralized dashboard for fleet management and impact visualization.
 
 ---
 
@@ -163,7 +163,7 @@ func main() {
 make -C operator install
 
 # Deploy the operator to your cluster
-make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.2.0
+make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.3.0
 ```
 
 ---
@@ -215,7 +215,7 @@ Pastaay is open-sourced software licensed under the [MIT License](LICENSE).
 <br>
 
 <p align="center">
-  <img src="docs/assets/main_bottom.png" alt="Pastaay QR Code">
+  <img src="docs/assets/main_footer.png" alt="Pastaay QR Code">
 </p>
 
 

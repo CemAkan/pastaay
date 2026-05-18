@@ -17,16 +17,17 @@ graph LR
 %% ==========================================
     subgraph CP ["CONTROL PLANE"]
         direction TB
-        CTL["<b>pastaayctl</b><br/>(CLI Orchestrator)"]
+        WC["<b>Web Console</b><br/>(Visual Builder & UI)"]
         OP["<b>Pastaay Operator</b><br/>(K8s CRD Controller)"]
+        CTL["<b>pastaayctl</b><br/>(CLI Orchestrator)"]
     end
 
     subgraph HOST ["HOST ENVIRONMENT"]
         direction TB
+        D["HTTP / gRPC Service"]
         A["Kafka / RabbitMQ Consumer"]
         B["Database/SQL Client"]
         C["Redis/Mongo Client"]
-        D["HTTP / gRPC Service"]
         H["<b>OS Resources (CPU/RAM)</b>"]
     end
 
@@ -37,7 +38,7 @@ graph LR
     end
 
 %% Invisible links to force vertical stacking on the left
-    OP ~~~ A
+    CTL ~~~ D
     H ~~~ F1
 
 %% ==========================================
@@ -48,14 +49,14 @@ graph LR
 
         subgraph IL ["INTERCEPTOR LAYER (ZERO-ALLOCATION)"]
             direction TB
+            I4["API Middleware<br/>(Webhook & Request)"]
+            I4 ~~~ I1
             I1["Broker Middleware<br/>(Metadata Extraction)"]
             I1 ~~~ I2
             I2["SQL Driver Wrapper<br/>(Evasion Shield)"]
             I2 ~~~ I3
             I3["NoSQL Monitor/Hook<br/>(Command Intercept)"]
-            I3 ~~~ I4
-            I4["API Middleware<br/>(Webhook & Request)"]
-            I4 ~~~ I5
+            I3 ~~~ I5
             I5["<b>Resource Sabotage Trigger</b>"]
         end
 
@@ -97,27 +98,28 @@ graph LR
 %% RELATIONSHIPS & ARROWS
 %% ==========================================
 
+%% Control Plane to Engine (Clean Routing)
+    WC == "REST API / Webhook" ===> I4
+    OP == "K8s API -> Webhook" ===> I4
+    CTL == "HTTP/JSON Webhook" ===> I4
+    CTL == "Redis PubSub" ===> M1
+
 %% Application Traffic to Interceptors
+    D -.-> I4
     A -.-> I1
     B -.-> I2
     C -.-> I3
-    D -.-> I4
-
-%% Interceptors to Evaluator
-    I1 & I2 & I3 & I4 --> E1
     I5 ==>|Intensity| E4
     I5 ==>|Chunk/Interval| E5
+
+%% Interceptors to Evaluator
+    I4 & I1 & I2 & I3 --> E1
 
 %% Evaluator reads Memory
     E1 ==>|Reads| M1
 
 %% Sabotage to Host Resources
     E4 & E5 -.->|Sabotage| H
-
-%% Control Plane to Engine (Clean Routing)
-    CTL == "Redis PubSub" ===> M1
-    CTL == "HTTP/JSON Webhook" ===> I4
-    OP == "K8s API -> Webhook" ===> I4
 
 %% File System to Memory
     F1 --> F2
@@ -143,9 +145,8 @@ graph LR
     class M1,M2 memory;
     class F1,F2 filesystem;
     class O1,O2 observability;
-    class CTL,OP control;
+    class CTL,OP,WC control;
 ```
-
 ---
 
 ## 1. Core Policy Logic & Security Guards
@@ -265,3 +266,9 @@ Pastaay generates specific span names based on the protocol and the type of faul
 * `pastaay.kafka.drop` *(Silent message omission)*
 * `pastaay.rabbitmq.latency` / `pastaay.rabbitmq.error`
 * `pastaay.rabbitmq.drop` *(Silent message omission)*
+
+<br>
+
+<p align="center">
+  <img src="assets/common_footer.gif" alt="Pastaay Bottom Banner">
+</p>
