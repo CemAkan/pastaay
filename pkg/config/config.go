@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -32,6 +33,31 @@ type Policy struct {
 	WildcardPrefix    string            `yaml:"-" json:"-"`
 }
 
+// configDecodeOrWarn decodes a generic camelCase scalar into target and logs warnings instead of silently dropping bad values.
+func configDecodeOrWarn(node yaml.Node, fieldName string, target interface{}) {
+	if err := node.Decode(target); err != nil {
+		log.Printf("[Pastaay-Config] WARN: field %q decode failed: %v", fieldName, err)
+	}
+}
+
+// configDecodeDuration parses a string node as time.Duration, logging both type errors and parse errors instead of swallowing them.
+func configDecodeDuration(node yaml.Node, fieldName string, target *time.Duration) {
+	if *target != 0 {
+		return
+	}
+	var s string
+	if err := node.Decode(&s); err != nil {
+		log.Printf("[Pastaay-Config] WARN: field %q is not a string: %v", fieldName, err)
+		return
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		log.Printf("[Pastaay-Config] WARN: invalid duration for %q (%q): %v", fieldName, s, err)
+		return
+	}
+	*target = d
+}
+
 // UnmarshalYAML implements custom dual-casing support to capture both snake_case and camelCase parameters.
 func (p *Policy) UnmarshalYAML(value *yaml.Node) error {
 	type shadowPolicy Policy
@@ -42,50 +68,44 @@ func (p *Policy) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*p = Policy(s)
 
-	// Decode into a raw node map to dynamically catch camelCase fallbacks from K8s/JSON streams
+	// Decode into a raw node map to dynamically catch camelCase fallbacks from K8s/JSON streams.
 	var rawMap map[string]yaml.Node
 	if err := value.Decode(&rawMap); err != nil {
 		return nil // Non-map payloads are safely bypassed
 	}
 
 	if node, ok := rawMap["latencyChance"]; ok && p.LatencyChance == 0 {
-		_ = node.Decode(&p.LatencyChance)
+		configDecodeOrWarn(node, "latencyChance", &p.LatencyChance)
 	}
-	if node, ok := rawMap["latencyDuration"]; ok && p.LatencyDuration == 0 {
-		var dStr string
-		if err := node.Decode(&dStr); err == nil {
-			p.LatencyDuration, _ = time.ParseDuration(dStr)
-		}
+	if node, ok := rawMap["latencyDuration"]; ok {
+		configDecodeDuration(node, "latencyDuration", &p.LatencyDuration)
 	}
 	if node, ok := rawMap["errorChance"]; ok && p.ErrorChance == 0 {
-		_ = node.Decode(&p.ErrorChance)
+		configDecodeOrWarn(node, "errorChance", &p.ErrorChance)
 	}
 	if node, ok := rawMap["errorCode"]; ok && p.ErrorCode == 0 {
-		_ = node.Decode(&p.ErrorCode)
+		configDecodeOrWarn(node, "errorCode", &p.ErrorCode)
 	}
 	if node, ok := rawMap["errorBody"]; ok && p.ErrorBody == "" {
-		_ = node.Decode(&p.ErrorBody)
+		configDecodeOrWarn(node, "errorBody", &p.ErrorBody)
 	}
 	if node, ok := rawMap["matchHeaders"]; ok && len(p.MatchHeaders) == 0 {
-		_ = node.Decode(&p.MatchHeaders)
+		configDecodeOrWarn(node, "matchHeaders", &p.MatchHeaders)
 	}
 	if node, ok := rawMap["dropConnection"]; ok && !p.DropConnection {
-		_ = node.Decode(&p.DropConnection)
+		configDecodeOrWarn(node, "dropConnection", &p.DropConnection)
 	}
 	if node, ok := rawMap["streamRollMode"]; ok && p.StreamRollMode == "" {
-		_ = node.Decode(&p.StreamRollMode)
+		configDecodeOrWarn(node, "streamRollMode", &p.StreamRollMode)
 	}
 	if node, ok := rawMap["throttleThreshold"]; ok && p.ThrottleThreshold == 0 {
-		_ = node.Decode(&p.ThrottleThreshold)
+		configDecodeOrWarn(node, "throttleThreshold", &p.ThrottleThreshold)
 	}
 	if node, ok := rawMap["ramChunkMB"]; ok && p.RAMChunkMB == 0 {
-		_ = node.Decode(&p.RAMChunkMB)
+		configDecodeOrWarn(node, "ramChunkMB", &p.RAMChunkMB)
 	}
-	if node, ok := rawMap["ramInterval"]; ok && p.RAMInterval == 0 {
-		var dStr string
-		if err := node.Decode(&dStr); err == nil {
-			p.RAMInterval, _ = time.ParseDuration(dStr)
-		}
+	if node, ok := rawMap["ramInterval"]; ok {
+		configDecodeDuration(node, "ramInterval", &p.RAMInterval)
 	}
 
 	return nil
@@ -131,7 +151,6 @@ func (c *PastaayConfig) Validate() error {
 			errs = append(errs, fmt.Errorf("%s target cannot be empty", prefix))
 		}
 
-		// Logical Sanity
 		if p.LatencyChance < 0 || p.LatencyChance > 1.0 {
 			errs = append(errs, fmt.Errorf("%s latency_chance must be between 0.0 and 1.0", prefix))
 		}
