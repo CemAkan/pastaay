@@ -3,12 +3,22 @@ package chaos
 import (
 	"context"
 	"crypto/sha256"
+	"log"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/telemetry"
+	"github.com/CemAkan/pastaay/pkg/tracing"
 )
+
+// maxRAMPoolMB is a global per-process ceiling to prevent the engine from self-OOMing when policies request unbounded RAM allocations.
+const maxRAMPoolMB int64 = 4096
+
+// currentPoolMB tracks total live LeakRAM allocation in megabytes.
+var currentPoolMB int64
 
 // ResourcePolicy holds the configuration for OS-level resource sabotage.
 type ResourcePolicy struct {
@@ -46,7 +56,8 @@ func BurnCPU(ctx context.Context, cores int, threshold int) {
 				for j := 0; j < threshold; j++ {
 					localSink = sha256.Sum256(payload)
 				}
-				_ = localSink
+
+				runtime.KeepAlive(localSink)
 				select {
 				case <-ctx.Done():
 					return
@@ -59,25 +70,41 @@ func BurnCPU(ctx context.Context, cores int, threshold int) {
 	wg.Wait()
 }
 
-// LeakRAM exhausts physical RAM via page-forcing.
+// LeakRAM exhausts physical RAM via page-forcing, capped by maxRAMPoolMB.
 func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	if interval <= 0 {
 		interval = 1 * time.Second
 	}
+	if chunkMB <= 0 {
+		return
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	chunkSize := chunkMB * 1024 * 1024
 	var pool [][]byte
 
-	// DRY allocation logic
-	allocate := func() {
+	defer func() {
+		atomic.AddInt64(&currentPoolMB, -int64(len(pool)*chunkMB))
+		pool = nil
+		runtime.GC()
+	}()
+
+	// DRY allocation logic with hard ceiling enforcement.
+	allocate := func() bool {
+		if atomic.LoadInt64(&currentPoolMB)+int64(chunkMB) > maxRAMPoolMB {
+			log.Printf("[Pastaay-Resource] RAM ceiling %dMB reached, refusing new chunk (%dMB)", maxRAMPoolMB, chunkMB)
+			return false
+		}
 		chunk := make([]byte, chunkSize)
 		// Page-forcing
 		for i := 0; i < chunkSize; i += 4096 {
 			chunk[i] = 1
 		}
 		pool = append(pool, chunk)
+		atomic.AddInt64(&currentPoolMB, int64(chunkMB))
+		return true
 	}
 
 	allocate()
@@ -85,9 +112,6 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Immediate cleanup
-			pool = nil
-			runtime.GC()
 			return
 		case <-ticker.C:
 			allocate()
@@ -98,6 +122,13 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 // TriggerResourceSabotage safely dispatches resource chaos.
 func TriggerResourceSabotage(ctx context.Context, policy ResourcePolicy) {
 	if policy.CPU.Enabled {
+
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.resource.cpu", "CPU Burner Activated", "burner")
+
+		telemetry.EmitInfo("resource", "CPU Burner Activated", map[string]interface{}{
+			"cores": policy.CPU.Cores, "threshold": policy.CPU.ThrottleThreshold,
+		}, span)
+
 		if policy.CPU.Duration > 0 {
 			cpuCtx, cancel := context.WithTimeout(ctx, policy.CPU.Duration)
 			go func() {
@@ -105,12 +136,18 @@ func TriggerResourceSabotage(ctx context.Context, policy ResourcePolicy) {
 				BurnCPU(cpuCtx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
 			}()
 		} else {
-			// Zero-duration bypass to prevent immediate suicide
 			go BurnCPU(ctx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
 		}
 	}
 
 	if policy.RAM.Enabled {
+
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.resource.ram", "RAM Leaker Activated", "leaker")
+
+		telemetry.EmitInfo("resource", "RAM Leaker Activated", map[string]interface{}{
+			"chunk_mb": policy.RAM.ChunkMB, "interval": policy.RAM.Interval.String(),
+		}, span)
+
 		if policy.RAM.Duration > 0 {
 			ramCtx, cancel := context.WithTimeout(ctx, policy.RAM.Duration)
 			go func() {
