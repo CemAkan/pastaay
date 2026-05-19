@@ -14,13 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/IBM/sarama"
-	"github.com/lib/pq"
-	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/redis/go-redis/v9"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"github.com/joho/godotenv"
 
 	"github.com/CemAkan/pastaay/pkg/brokerchaos"
 	"github.com/CemAkan/pastaay/pkg/chaos"
@@ -32,6 +26,14 @@ import (
 	"github.com/CemAkan/pastaay/pkg/sqlchaos"
 	"github.com/CemAkan/pastaay/pkg/tracing"
 	"github.com/CemAkan/pastaay/web"
+	"github.com/IBM/sarama"
+	"github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type brokerAdapter struct {
@@ -48,6 +50,7 @@ func (b *brokerAdapter) IsCommandIgnored(protocol string, cmd string) bool {
 }
 
 func main() {
+	_ = godotenv.Load()
 	log.Println("[INFO] PASTAAY ENGINE BOOTING...")
 
 	mainCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -65,7 +68,9 @@ func main() {
 		log.Println("[INFO] Finalizing OpenTelemetry: Flushing spans...")
 		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = shutdownOTel(flushCtx)
+		if err := shutdownOTel(flushCtx); err != nil {
+			log.Printf("[WARN] OTel shutdown: %v", err)
+		}
 	}()
 
 	// Configuration & Hot-Reload Watcher
@@ -75,11 +80,13 @@ func main() {
 		log.Fatalf("[FATAL] Core configuration load failure: %v", err)
 	}
 	cfgManager := config.NewManager(cfg)
-	_ = config.WatchConfig(cfgPath, cfgManager.Update)
+	if err := config.WatchConfig(cfgPath, cfgManager.Update); err != nil {
+		log.Printf("[WARN] config hot-reload watcher disabled: %v", err)
+	}
 
 	// Admin Server
 	adminMux := http.NewServeMux()
-	adminMux.Handle("/metrics", metrics.GetHandler())
+	adminMux.Handle("/metrics", promhttp.Handler())
 
 	webhookToken := getEnv("PASTAAY_WEBHOOK_TOKEN", "")
 	if webhookToken == "" {
@@ -91,10 +98,12 @@ func main() {
 
 	web.RegisterHandlers(adminMux, cfgManager)
 
+	adminAddr := getEnv("ADMIN_ADDR", ":2112")
 	go func() {
-		log.Println("[INFO] Pastaay Admin Server listening on :2112")
-		if err := http.ListenAndServe(":2112", adminMux); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("[FATAL] Admin server crashed: %v", err)
+		log.Printf("[INFO] Pastaay Admin Server listening on %s", adminAddr)
+		if err := http.ListenAndServe(adminAddr, adminMux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("[ERROR] Admin server crashed: %v", err)
+			stop()
 		}
 	}()
 
@@ -110,7 +119,9 @@ func main() {
 		defer func() {
 			disCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			_ = mClient.Disconnect(disCtx)
+			if err := mClient.Disconnect(disCtx); err != nil {
+				log.Printf("[WARN] Mongo disconnect: %v", err)
+			}
 		}()
 	}
 
@@ -123,6 +134,7 @@ func main() {
 	// Prometheus Health Sync (10s)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-mainCtx.Done():
@@ -144,7 +156,9 @@ func main() {
 	wg.Add(4)
 	go initKafka(mainCtx, cfgManager, &wg)
 	go initRabbitMQ(mainCtx, cfgManager, &wg)
-	go startBackgroundPinger(mainCtx, &wg)
+	appAddr := getEnv("APP_ADDR", ":8080")
+	appHealthURL := getEnv("APP_HEALTH_URL", "http://localhost"+appAddr+"/api/v1/ping")
+	go startBackgroundPinger(mainCtx, &wg, appHealthURL)
 	go func() {
 		defer wg.Done()
 		chaos.MonitorAndTrigger(mainCtx, cfgManager)
@@ -155,7 +169,7 @@ func main() {
 	chaosHandler := ritual.Middleware(cfgManager)(mux)
 
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         appAddr,
 		Handler:      chaosHandler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -169,15 +183,19 @@ func main() {
 
 		shutdownCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutCancel()
-		_ = srv.Shutdown(shutdownCtx)
 
-		wg.Wait() // Ensure all background workers exit cleanly
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("[WARN] HTTP server shutdown: %v", err)
+		}
+
+		wg.Wait()
 		close(done)
 	}()
 
-	log.Println("[INFO] Pastaay Demo is LIVE on :8080")
+	log.Printf("[INFO] Pastaay Demo is LIVE on %s", appAddr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("[FATAL] Server crash: %v", err)
+		log.Printf("[ERROR] HTTP server crashed: %v", err)
+		stop()
 	}
 
 	<-done
@@ -192,7 +210,11 @@ func initDatastores(mgr *config.Manager) (*redis.Client, *sql.DB, *mongo.Client)
 	rdb.AddHook(redischaos.NewChaosHook(mgr))
 
 	sqlchaos.Register("pastaay-postgres", &pq.Driver{}, mgr)
-	db, _ := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@db:5432/shortener?sslmode=disable"))
+	db, dbErr := sql.Open("pastaay-postgres", getEnv("DB_DSN", "postgres://pastaay:secret@db:5432/shortener?sslmode=disable"))
+	if dbErr != nil {
+		log.Printf("[ERROR] Postgres init failure (DSN parse): %v", dbErr)
+		db = nil
+	}
 
 	mOpts := options.Client().ApplyURI(getEnv("MONGO_URI", "mongodb://mongo:27017"))
 	mongochaos.ApplyChaos(mOpts, mgr)
@@ -346,7 +368,10 @@ func initRabbitMQ(ctx context.Context, mgr *config.Manager, wg *sync.WaitGroup) 
 			case <-childCtx.Done():
 				return
 			case <-ticker.C:
-				_ = ch.PublishWithContext(ctx, "", q.Name, false, false, amqp.Publishing{Body: []byte("payload")})
+				if err := ch.PublishWithContext(ctx, "", q.Name, false, false,
+					amqp.Publishing{Body: []byte("payload")}); err != nil && ctx.Err() == nil {
+					log.Printf("[WARN] rabbitmq publish failed: %v", err)
+				}
 			}
 		}
 	}()
@@ -391,7 +416,7 @@ func setupRouter(mgr *config.Manager, rdb *redis.Client, db *sql.DB, mClient *mo
 	return mux
 }
 
-func startBackgroundPinger(ctx context.Context, wg *sync.WaitGroup) {
+func startBackgroundPinger(ctx context.Context, wg *sync.WaitGroup, healthURL string) {
 	defer wg.Done()
 
 	ticker := time.NewTicker(3 * time.Second)
@@ -403,12 +428,12 @@ func startBackgroundPinger(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost:8080/api/v1/ping", nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
 			if err != nil {
 				continue
 			}
 			if resp, err := client.Do(req); err == nil {
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
 			}
 		}
