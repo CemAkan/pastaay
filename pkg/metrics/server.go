@@ -1,35 +1,39 @@
 package metrics
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
-	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var (
-	serverOnce sync.Once
-)
+func StartServer(ctx context.Context, port string) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
 
-// GetHandler returns the standard Prometheus HTTP handler.
-func GetHandler() http.Handler {
-	return promhttp.Handler()
-}
+	srv := &http.Server{
+		Addr:              port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 
-// StartServer boots up an independent HTTP server to expose Prometheus metrics.
-func StartServer(port string) {
-	serverOnce.Do(func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", GetHandler())
+	go func() {
+		log.Printf("Pastaay: Metrics server listening on %s/metrics", port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("[ERROR] Metrics server crashed: %v", err)
+		}
+	}()
 
-		log.Printf("Pastaay: Metrics server listening on %s/metrics\n", port)
-
-		go func() {
-
-			if err := http.ListenAndServe(port, mux); err != nil && err != http.ErrServerClosed {
-				log.Printf("[ERROR] Pastaay: Metrics server failed on %s (Port in use?). Metrics disabled: %v\n", port, err)
-			}
-		}()
-	})
+	go func() {
+		<-ctx.Done()
+		log.Println("Pastaay: Shutting down metrics server...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("[WARN] Metrics server shutdown: %v", err)
+		}
+	}()
 }
