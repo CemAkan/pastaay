@@ -18,7 +18,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Shared flags for attack vectors
 var (
 	strikeType    string
 	strikeTarget  string
@@ -31,14 +30,12 @@ var (
 	broadcastMode bool
 )
 
-// Sub-Command: Strike
 var strikeCmd = &cobra.Command{
 	Use:   "strike",
 	Short: "Imperative Strike: Inject chaos via flags",
 	Run:   runStrike,
 }
 
-// Sub-Command: Inject
 var injectCmd = &cobra.Command{
 	Use:   "inject [file.yaml]",
 	Short: "Payload Injection: Apply a YAML policy file",
@@ -46,21 +43,18 @@ var injectCmd = &cobra.Command{
 	Run:   runInject,
 }
 
-// Sub-Command: Snipe
 var snipeCmd = &cobra.Command{
 	Use:   "snipe",
 	Short: "Interactive Sniper: Guided chaos injection wizard",
 	Run:   runSnipe,
 }
 
-// Sub-Command: Rollback
-var rollbackCmd = &cobra.Command{
-	Use:   "rollback",
-	Short: "Emergency Kill Switch: Revoke all active chaos policies",
-	Run:   runRollback,
+var haltCmd = &cobra.Command{
+	Use:   "halt",
+	Short: "Emergency Kill Switch: Revoke all active chaos policies instantly",
+	Run:   runHalt,
 }
 
-// Sub-Command: Broadcast
 var broadcastCmd = &cobra.Command{
 	Use:   "broadcast [file.yaml]",
 	Short: "Fleet Broadcast: Publish policy to all nodes via Redis PubSub",
@@ -72,7 +66,7 @@ var broadcastCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(strikeCmd, injectCmd, snipeCmd, rollbackCmd, broadcastCmd)
+	rootCmd.AddCommand(strikeCmd, injectCmd, snipeCmd, haltCmd, broadcastCmd)
 
 	strikeCmd.Flags().StringVarP(&strikeType, "type", "p", "http", "Protocol type")
 	strikeCmd.Flags().StringVarP(&strikeTarget, "target", "t", "all", "Target endpoint")
@@ -82,10 +76,8 @@ func init() {
 	strikeCmd.Flags().Float64Var(&strikeEProb, "error-chance", 1.0, "Error probability")
 	strikeCmd.Flags().BoolVarP(&strikeDrop, "drop", "d", false, "Drop connection")
 	strikeCmd.Flags().BoolVarP(&broadcastMode, "broadcast", "b", false, "Broadcast to entire fleet via Redis")
-	strikeCmd.Flags().DurationVar(&strikeTTL, "ttl", 0, "Auto-rollback duration (Dead man's switch)")
+	strikeCmd.Flags().DurationVar(&strikeTTL, "ttl", 0, "Auto-halt duration (Dead man's switch)")
 }
-
-// Core Logic Engines
 
 func runStrike(cmd *cobra.Command, args []string) {
 	policy := map[string]interface{}{
@@ -108,9 +100,14 @@ func runStrike(cmd *cobra.Command, args []string) {
 	}
 
 	payload := map[string]interface{}{
-		"version": 1, "policies": []interface{}{policy},
+		"version":  1,
+		"policies": []interface{}{policy},
 	}
-	jsonBytes, _ := json.Marshal(payload)
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Printf("%s[!] Strike payload marshal failed: %v%s\n", cRed, err, cReset)
+		return
+	}
 
 	dispatch(jsonBytes)
 }
@@ -129,8 +126,8 @@ func runSnipe(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s[#] PASTAAY SNIPER MODE%s\n", cBold+cRed, cReset)
 
 	fmt.Print("Target (e.g. all, /api/v1/ping): ")
-	strikeTarget, _ = reader.ReadString('\n')
-	strikeTarget = strings.TrimSpace(strikeTarget)
+	t, _ := reader.ReadString('\n')
+	strikeTarget = strings.TrimSpace(t)
 
 	fmt.Print("Effect (1: Latency, 2: Error): ")
 	choice, _ := reader.ReadString('\n')
@@ -143,7 +140,7 @@ func runSnipe(cmd *cobra.Command, args []string) {
 	runStrike(cmd, args)
 }
 
-func runRollback(cmd *cobra.Command, args []string) {
+func runHalt(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s[!] EMERGENCY OVERRIDE INITIATED...%s\n", cYellow, cReset)
 	fmt.Printf("%s[*] \"Some things are meant to be left alone...\"%s\n", cGray, cReset)
 	strikeTTL = 0
@@ -151,7 +148,6 @@ func runRollback(cmd *cobra.Command, args []string) {
 	dispatch(reset)
 }
 
-// Handles HTTP or Redis Broadcast
 func dispatch(payload []byte) {
 	if broadcastMode {
 		executeRedisBroadcast(payload)
@@ -160,7 +156,7 @@ func dispatch(payload []byte) {
 	}
 
 	if strikeTTL > 0 {
-		fmt.Printf("\n%s[*] Dead Man's Switch active. Rolling back in %v (Press Ctrl+C to abort early)...%s\n", cGray, strikeTTL, cReset)
+		fmt.Printf("\n%s[*] Dead Man's Switch active. Halting in %v (Press Ctrl+C to abort early)...%s\n", cGray, strikeTTL, cReset)
 
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -170,12 +166,12 @@ func dispatch(payload []byte) {
 
 		select {
 		case <-timer.C:
-			fmt.Printf("\n%s[*] TTL Expired. Executing Auto-Rollback...%s\n", cYellow, cReset)
+			fmt.Printf("\n%s[*] TTL Expired. Executing Auto-Halt...%s\n", cYellow, cReset)
 		case <-ctx.Done():
-			fmt.Printf("\n%s[!] Operator Abort detected. Executing Emergency Rollback...%s\n", cBold+cRed, cReset)
+			fmt.Printf("\n%s[!] Operator Abort detected. Executing Emergency Halt...%s\n", cBold+cRed, cReset)
 		}
 
-		runRollback(nil, nil)
+		runHalt(nil, nil)
 	}
 }
 
@@ -224,8 +220,10 @@ func executeRedisBroadcast(payload []byte) {
 	rdb := redis.NewClient(&redis.Options{Addr: addr})
 	defer rdb.Close()
 
-	err := rdb.Publish(context.Background(), "pastaay:chaos:policies", string(payload)).Err()
-	if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := rdb.Publish(ctx, "pastaay:chaos:policies", string(payload)).Err(); err != nil {
 		fmt.Printf("%s[!] Redis Broadcast Failed: %v%s\n", cRed, err, cReset)
 		return
 	}
