@@ -74,12 +74,18 @@ func init() {
 }
 
 // Profile Logic
-
 func runListProfiles() {
-	cf := loadConfigFile(getCfgPath())
+	cf, err := loadConfigFile(getCfgPath())
+	if err != nil {
+		fmt.Printf("%s[!] Profile registry unreadable: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
 
 	if outputJSON {
-		json.NewEncoder(os.Stdout).Encode(cf.Profiles)
+		if err := json.NewEncoder(os.Stdout).Encode(cf.Profiles); err != nil {
+			fmt.Fprintf(os.Stderr, "[!] JSON encode failed: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -93,39 +99,61 @@ func runListProfiles() {
 		}
 		fmt.Fprintf(w, " %s\t%s\t%s\t%s%s%s\n", mark, name, p.Target, color, mark, cReset)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "[!] output flush failed: %v\n", err)
+	}
 }
 
 func runAddProfile(cmd *cobra.Command, args []string) {
 	path := getCfgPath()
-	cf := loadConfigFile(path)
+	cf, err := loadConfigFile(path)
+	if err != nil {
+		fmt.Printf("%s[!] Profile registry unreadable (refusing to overwrite): %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
 	cf.Profiles[args[0]] = Profile{Name: args[0], Target: args[1], Token: authToken}
 	if cf.CurrentContext == "" {
 		cf.CurrentContext = args[0]
 	}
-	saveConfigFile(path, cf)
+	if err := saveConfigFile(path, cf); err != nil {
+		fmt.Printf("%s[!] Could not persist profile: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
 	fmt.Printf("%s[+] Profile '%s' saved.%s\n", cGreen, args[0], cReset)
 }
 
 func runUseProfile(cmd *cobra.Command, args []string) {
 	path := getCfgPath()
-	cf := loadConfigFile(path)
+	cf, err := loadConfigFile(path)
+	if err != nil {
+		fmt.Printf("%s[!] Profile registry unreadable: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
 	if _, ok := cf.Profiles[args[0]]; !ok {
 		fmt.Printf("%s[!] Profile not found.%s\n", cRed, cReset)
-		return
+		os.Exit(1)
 	}
 	cf.CurrentContext = args[0]
-	saveConfigFile(path, cf)
+	if err := saveConfigFile(path, cf); err != nil {
+		fmt.Printf("%s[!] Could not persist active context: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
 	fmt.Printf("%s[+] Switched to '%s'.%s\n", cGreen, args[0], cReset)
 }
 
 // History & Reporting Logic
-
 func runHistory(cmd *cobra.Command, args []string) {
-	entries := loadHistory()
+	entries, err := loadHistory()
+	if err != nil {
+		fmt.Printf("%s[!] History file unreadable: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
 
 	if outputJSON {
-		json.NewEncoder(os.Stdout).Encode(entries)
+		if err := json.NewEncoder(os.Stdout).Encode(entries); err != nil {
+			fmt.Fprintf(os.Stderr, "[!] JSON encode failed: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -144,12 +172,19 @@ func runHistory(cmd *cobra.Command, args []string) {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s%s%s\n", e.Timestamp.Format("01-02 15:04"), e.Profile, e.Target, resColor, e.Result, cReset)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "[!] output flush failed: %v\n", err)
+	}
 }
 
 func runReport(cmd *cobra.Command, args []string) {
-	entries := loadHistory()
+	entries, err := loadHistory()
+	if err != nil {
+		fmt.Printf("%s[!] History file unreadable: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
 	if len(entries) == 0 {
+		fmt.Printf("%s[!] No strikes recorded yet.%s\n", cYellow, cReset)
 		return
 	}
 	last := entries[len(entries)-1]
@@ -158,53 +193,111 @@ func runReport(cmd *cobra.Command, args []string) {
 		last.Timestamp.Format(time.RFC1123), last.Target, last.Result)
 
 	fileName := fmt.Sprintf("report_%d.md", last.Timestamp.Unix())
-	os.WriteFile(fileName, []byte(report), 0644)
+	if err := os.WriteFile(fileName, []byte(report), 0o644); err != nil {
+		fmt.Printf("%s[!] Report write failed (%s): %v%s\n", cRed, fileName, err, cReset)
+		os.Exit(1)
+	}
 	fmt.Printf("%s[+] Report generated: %s%s\n", cGreen, fileName, cReset)
 }
 
 // Global Helpers
-
 func getCfgPath() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[!] could not resolve home dir, falling back to cwd: %v\n", err)
+		home = "."
+	}
 	return filepath.Join(home, ".pastaayctl.json")
 }
 
-func loadConfigFile(path string) ConfigFile {
-	data, err := os.ReadFile(path)
-
+func loadConfigFile(path string) (ConfigFile, error) {
 	cf := ConfigFile{Profiles: make(map[string]Profile)}
 
-	if err == nil {
-		json.Unmarshal(data, &cf)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cf, nil
+		}
+		return cf, fmt.Errorf("read %s: %w", path, err)
 	}
-	
+
+	if len(data) == 0 {
+		return cf, nil
+	}
+
+	if err := json.Unmarshal(data, &cf); err != nil {
+		return cf, fmt.Errorf("parse %s (corrupt registry?): %w", path, err)
+	}
+
 	if cf.Profiles == nil {
 		cf.Profiles = make(map[string]Profile)
 	}
-	return cf
+	return cf, nil
 }
 
-func saveConfigFile(path string, cf ConfigFile) {
-	data, _ := json.MarshalIndent(cf, "", "  ")
-	os.WriteFile(path, data, 0600)
+func saveConfigFile(path string, cf ConfigFile) error {
+	data, err := json.MarshalIndent(cf, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
-func loadHistory() []StrikeEntry {
-	home, _ := os.UserHomeDir()
-	data, _ := os.ReadFile(filepath.Join(home, ".pastaay_history.json"))
+func loadHistory() ([]StrikeEntry, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	historyPath := filepath.Join(home, ".pastaay_history.json")
+
+	data, err := os.ReadFile(historyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", historyPath, err)
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+
 	var entries []StrikeEntry
-	json.Unmarshal(data, &entries)
-	return entries
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse %s (corrupt history?): %w", historyPath, err)
+	}
+	return entries, nil
 }
 
 func recordStrike(target, sType, result string) {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
 	historyPath := filepath.Join(home, ".pastaay_history.json")
-	cf := loadConfigFile(getCfgPath())
+
+	cf, cfErr := loadConfigFile(getCfgPath())
+	if cfErr != nil {
+		fmt.Fprintf(os.Stderr, "[!] profile registry read failed during strike record: %v\n", cfErr)
+	}
 
 	var entries []StrikeEntry
-	data, _ := os.ReadFile(historyPath)
-	_ = json.Unmarshal(data, &entries)
+	if data, err := os.ReadFile(historyPath); err == nil && len(data) > 0 {
+		if uerr := json.Unmarshal(data, &entries); uerr != nil {
+			backup := historyPath + ".corrupt"
+			if werr := os.WriteFile(backup, data, 0o600); werr != nil {
+				fmt.Fprintf(os.Stderr, "[!] history corrupt AND backup failed (%s): %v\n", backup, werr)
+			} else {
+				fmt.Fprintf(os.Stderr, "[!] history corrupt, backed up to %s: %v\n", backup, uerr)
+			}
+			entries = nil
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "[!] history read failed: %v\n", err)
+		return
+	}
 
 	entries = append(entries, StrikeEntry{
 		Timestamp: time.Now(),
@@ -214,6 +307,12 @@ func recordStrike(target, sType, result string) {
 		Result:    result,
 	})
 
-	newData, _ := json.MarshalIndent(entries, "", "  ")
-	_ = os.WriteFile(historyPath, newData, 0644)
+	newData, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[!] history marshal failed: %v\n", err)
+		return
+	}
+	if err := os.WriteFile(historyPath, newData, 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "[!] history write failed: %v\n", err)
+	}
 }
