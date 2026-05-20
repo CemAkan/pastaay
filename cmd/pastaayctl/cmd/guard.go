@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
+	"github.com/CemAkan/pastaay/pkg/guard"
 	"github.com/spf13/cobra"
 )
 
@@ -37,40 +37,18 @@ func init() {
 	rootCmd.AddCommand(lintCmd, planCmd, validateCmd)
 }
 
-//  Logic Implementations
-
+// Logic Implementations
 func runLint(cmd *cobra.Command, args []string) {
 	cfg := loadAndCheck(args[0])
-	violations := 0
-	targets := make(map[string]string)
+	res := guard.Analyze(cfg)
 
-	for _, p := range cfg.Policies {
-		key := p.Type + ":" + p.Target
-
-		// Conflict Detection
-		if original, exists := targets[key]; exists {
-			fmt.Printf("%s[FAIL]%s Logical Conflict: '%s' overlaps with '%s' on %s\n", cRed, cReset, p.Name, original, key)
-			violations++
-		}
-		targets[key] = p.Name
-
-		// Outage vs Jitter Bounds
-		if p.LatencyDuration > 10*time.Second {
-			fmt.Printf("%s[FAIL]%s %s: Latency duration triggers hard timeouts.\n", cRed, cReset, p.Name)
-			violations++
-		}
-
-		// OOM Safety Guard
-		if p.Type == "resource" && p.RAMChunkMB > 4096 {
-			fmt.Printf("%s[WARN]%s %s: Allocation chunk (>4GB) risks immediate OOM.\n", cYellow, cReset, p.Name)
-			violations++
-		}
-	}
-
-	if violations == 0 {
+	if len(res.Issues) == 0 {
 		fmt.Printf("%s[+] Linter passed: Policy follows SRE safety standards.%s\n", cGreen, cReset)
 	} else {
-		fmt.Printf("\n%s[!] SRE Check Failed: Found %d issues.%s\n", cRed, violations, cReset)
+		fmt.Printf("\n%s[!] SRE Check Failed: Found %d issues.%s\n", cRed, len(res.Issues), cReset)
+		for _, issue := range res.Issues {
+			fmt.Printf("  - %s\n", issue)
+		}
 		os.Exit(1)
 	}
 }
@@ -79,33 +57,27 @@ func runPlan(cmd *cobra.Command, args []string) {
 	cfg := loadAndCheck(args[0])
 	fmt.Printf("%s[#] BLAST RADIUS FORECAST: %s%s\n", cBold+cCyan, args[0], cReset)
 
-	totalIntensity := 0.0
+	res := guard.Analyze(cfg)
+
+	// Print Individual
 	for _, p := range cfg.Policies {
-		// Weighted Risk Score: (Error * 0.7) + (Latency * 0.3)
 		intensity := (p.ErrorChance * 0.7) + (p.LatencyChance * 0.3)
 		if p.DropConnection {
 			intensity = 1.0
 		}
-		totalIntensity += intensity
-
-		status, color := "LOW", cGreen
-		if intensity > 0.6 {
-			status, color = "CRITICAL", cRed
-		} else if intensity > 0.3 {
-			status, color = "MEDIUM", cYellow
-		}
-
-		fmt.Printf("[%s%-8s%s] %-10s -> %-15s | Risk: %.2f\n", color, status, cReset, p.Type, p.Target, intensity)
+		fmt.Printf("[%s] %-10s -> %-15s | Weight: %.2f\n", cCyan, p.Type, p.Target, intensity)
 	}
 
-	// Observability Throughput Prediction
 	fmt.Printf("\n%s[ OBSERVABILITY FORECAST ]%s\n", cBold, cReset)
-	fmt.Printf("  Expected Span Throughput: ~%d spans/sec\n", len(cfg.Policies)*15)
-	if totalIntensity > 2.0 {
-		fmt.Printf("  Infrastructure Load: %sSEVERE - High Risk%s\n", cRed, cReset)
-	} else {
-		fmt.Printf("  Infrastructure Load: %sSTABLE - Safe Bounds%s\n", cGreen, cReset)
+	color := cGreen
+	if res.Status == "CRITICAL" {
+		color = cRed
+	} else if res.Status == "HIGH" {
+		color = cYellow
 	}
+
+	fmt.Printf("  Total Impact Score: %.2f\n", res.TotalRisk)
+	fmt.Printf("  Infrastructure Load: %s%s%s\n", color, res.Status, cReset)
 }
 
 func runValidate(cmd *cobra.Command, args []string) {
