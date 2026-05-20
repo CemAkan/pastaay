@@ -22,6 +22,9 @@ var (
 	failThreshold int
 )
 
+// Reusable probe client — avoids per-call socket churn.
+var probeClient = &http.Client{Timeout: 2 * time.Second}
+
 var runCmd = &cobra.Command{
 	Use:   "run [file.yaml]",
 	Short: "Automated Experiment: Resilient injection with SLA guarding",
@@ -36,7 +39,7 @@ func init() {
 	runCmd.Flags().DurationVarP(&expInterval, "interval", "i", 2*time.Second, "Health probe frequency")
 	runCmd.Flags().StringVar(&expHealthURL, "health-url", "", "Custom health check URL")
 	runCmd.Flags().DurationVar(&maxLatency, "max-latency", 500*time.Millisecond, "SLA: Abort if latency exceeds this")
-	runCmd.Flags().IntVar(&failThreshold, "threshold", 3, "Failure threshold before auto-rollback")
+	runCmd.Flags().IntVar(&failThreshold, "threshold", 3, "Failure threshold before auto-halt")
 }
 
 func runExperiment(cmd *cobra.Command, args []string) {
@@ -55,14 +58,14 @@ func runExperiment(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	if ok, _, _ := probe(healthURL); !ok {
+	if ok, _, _ := probe(ctx, healthURL); !ok {
 		fmt.Printf("%s[!] ABORTED: System is already unhealthy or health URL is unreachable.%s\n", cRed, cReset)
 		return
 	}
 
 	defer func() {
-		fmt.Printf("\n%s[*] Finalizing: Triggering Atomic Rollback...%s\n", cCyan, cReset)
-		runRollback(nil, nil)
+		fmt.Printf("\n%s[*] Finalizing: Triggering Atomic Halt...%s\n", cCyan, cReset)
+		runHalt(nil, nil)
 	}()
 
 	content, err := os.ReadFile(args[0])
@@ -79,7 +82,7 @@ func runExperiment(cmd *cobra.Command, args []string) {
 	defer expTimer.Stop()
 
 	var totalProbes, errorCount, latencyCount float64
-	alpha, beta := 1.5, 0.5 // Penalty weights
+	alpha, beta := 1.5, 0.5
 	failures, start := 0, time.Now()
 
 	for {
@@ -94,7 +97,7 @@ func runExperiment(cmd *cobra.Command, args []string) {
 			return
 		case <-ticker.C:
 			totalProbes++
-			ok, latency, isError := probe(healthURL)
+			ok, latency, isError := probe(ctx, healthURL)
 
 			if isError {
 				errorCount++
@@ -108,7 +111,7 @@ func runExperiment(cmd *cobra.Command, args []string) {
 				if failures >= failThreshold {
 					fmt.Printf("\n%s[!!!] SLA BREACHED: Emergency shutdown triggered.%s\n", cBold+cRed, cReset)
 					printResilienceScore(totalProbes, errorCount, latencyCount, alpha, beta)
-					runRollback(nil, nil)
+					runHalt(nil, nil)
 					os.Exit(1)
 				}
 			} else {
@@ -119,7 +122,6 @@ func runExperiment(cmd *cobra.Command, args []string) {
 	}
 }
 
-// Resilience Score
 func printResilienceScore(total, errs, lats, alpha, beta float64) {
 	if total == 0 {
 		return
@@ -150,17 +152,20 @@ func printResilienceScore(total, errs, lats, alpha, beta float64) {
 	fmt.Printf("Final Score     : %s%.2f / 100 [%s]%s\n\n", color, score, grade, cReset)
 }
 
-func probe(url string) (bool, time.Duration, bool) {
-	client := http.Client{Timeout: 2 * time.Second}
+func probe(ctx context.Context, url string) (bool, time.Duration, bool) {
 	start := time.Now()
-	resp, err := client.Get(url)
 
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, time.Since(start), true
 	}
 
+	resp, err := probeClient.Do(req)
+	if err != nil {
+		return false, time.Since(start), true
+	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 500 {
 		return false, time.Since(start), true
