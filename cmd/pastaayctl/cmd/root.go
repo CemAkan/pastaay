@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -58,7 +59,7 @@ func init() {
 
 	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		setupEnvironment()
-		triggerWhiteTulipAnomaly()
+		triggerWhiteTulipAnomaly(cmd.Context())
 	}
 }
 
@@ -107,7 +108,12 @@ func buildCustomHelpTemplate() {
 func setupEnvironment() {
 
 	configPath := getCfgPath()
-	cf := loadConfigFile(configPath)
+	cf, err := loadConfigFile(configPath)
+
+	if err != nil {
+		fmt.Println("ERROR: Conf file can not load")
+	}
+
 	active := cf.CurrentContext
 	if profileName != "" {
 		active = profileName
@@ -125,8 +131,7 @@ func setupEnvironment() {
 	}
 }
 
-func triggerWhiteTulipAnomaly() {
-
+func triggerWhiteTulipAnomaly(ctx context.Context) {
 	if rand.Float64() < 0.01 {
 		tulip := "              \n" +
 			"     /\\^/`\\   \n" +
@@ -150,7 +155,10 @@ func triggerWhiteTulipAnomaly() {
 		fmt.Printf("%s%s%s\n\n", cBold+cWhite, tulip, cReset)
 		fmt.Printf("%s\"I asked God for a sign of forgiveness. A specific one. A white tulip.\"\n - W.B.%s\n\n", cGray, cReset)
 
-		time.Sleep(7 * time.Second)
+		select {
+		case <-ctx.Done():
+		case <-time.After(7 * time.Second):
+		}
 		fmt.Print("\033[H\033[2J")
 	}
 }

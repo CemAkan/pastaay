@@ -37,7 +37,6 @@ func init() {
 }
 
 // Logic Implementations
-
 func runTop(cmd *cobra.Command, args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -69,8 +68,11 @@ func runTop(cmd *cobra.Command, args []string) {
 			resp, err := fetchMetrics(ctx)
 			if err != nil {
 				drawOfflineScreen(err.Error())
-
-				time.Sleep(1 * time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
+				}
 				continue
 			}
 			renderDashboard(resp, lastFaults)
