@@ -1,147 +1,69 @@
 {{ define "docs_content" }}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/dracula.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
 <div class="flex h-full gap-6">
-    <div class="w-64 bg-gray-800 border border-gray-700 rounded-lg p-4 h-fit">
-        <h3 class="text-lg font-bold text-gray-200 mb-4 border-b border-gray-700 pb-2">Documents</h3>
-        <ul class="space-y-2 text-sm font-mono" id="doc-list">
-            <li><a href="#" onclick="loadDoc('index.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">🏠 Home</a></li>
-            <li><a href="#" onclick="loadDoc('architecture.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">architecture.md</a></li>
-            <li><a href="#" onclick="loadDoc('configuration.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">configuration.md</a></li>
-            <li><a href="#" onclick="loadDoc('operator.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">operator.md</a></li>
-            <li><a href="#" onclick="loadDoc('pastaayctl.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">pastaayctl.md</a></li>
-            <li><a href="#" onclick="loadDoc('remote_control.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">remote_control.md</a></li>
-            <li><a href="#" onclick="loadDoc('web_console.md')" class="text-gray-400 hover:text-cyan-400 no-underline transition-colors block py-1">web_console.md</a></li>
+    <div class="w-64 flex-shrink-0 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded-lg p-4 h-fit shadow-sm">
+        <h3 class="text-xs font-bold text-[var(--text-header)] mb-4 border-b border-[var(--border-color)] pb-2 font-mono uppercase tracking-widest">Documents</h3>
+        <ul class="space-y-2 text-xs font-mono list-none" id="doc-list">
+            <li><a href="#" onclick="loadDoc('index.md')" data-doc="index.md" class="text-[var(--text-primary)]">🏠 Home</a></li>
+            <li><a href="#" onclick="loadDoc('architecture.md')" data-doc="architecture.md" class="text-[var(--text-primary)]">Architecture</a></li>
+            <li><a href="#" onclick="loadDoc('configuration.md')" data-doc="configuration.md" class="text-[var(--text-primary)]">Configuration</a></li>
+            <li><a href="#" onclick="loadDoc('operator.md')" data-doc="operator.md" class="text-[var(--text-primary)]">Operator</a></li>
+            <li><a href="#" onclick="loadDoc('pastaayctl.md')" data-doc="pastaayctl.md" class="text-[var(--text-primary)]">Pastaayctl</a></li>
+            <li><a href="#" onclick="loadDoc('remote_control.md')" data-doc="remote_control.md" class="text-[var(--text-primary)]">Remote Control</a></li>
+            <li><a href="#" onclick="loadDoc('web_console.md')" data-doc="web_console.md" class="text-[var(--text-primary)]">Web Console</a></li>
         </ul>
     </div>
 
-    <div class="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-8 overflow-y-auto">
-        <div id="md-viewer" class="prose prose-invert max-w-none relative">
-            <p class="text-gray-400 animate-pulse font-mono">Select a document to read...</p>
-        </div>
+    <div class="flex-1 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded-lg p-8 overflow-y-auto h-full shadow-inner">
+        <article id="md-viewer" class="md-content">
+            <p class="text-[var(--text-primary)] animate-pulse font-mono">Select a document...</p>
+        </article>
     </div>
 </div>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function() {
-        mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    function toggleZoom(el) { el.classList.toggle('mermaid-fullscreen'); }
 
-        const renderer = new marked.Renderer();
-        const originalCodeRenderer = renderer.code.bind(renderer);
-        renderer.code = function(code, language, isEscaped) {
-            if (language === 'mermaid') {
-                return '<div class="mermaid-container" title="Click to Expand / Collapse"><div class="mermaid">\n' + code + '\n</div></div>';
-            }
-            return originalCodeRenderer(code, language, isEscaped);
-        };
+    async function loadDoc(filename) {
+        const viewer = document.getElementById('md-viewer');
+        viewer.innerHTML = '<p class="text-sky-400 animate-pulse font-mono text-sm">Reading ' + filename + '...</p>';
 
-        marked.setOptions({
-            renderer: renderer,
-            highlight: function(code, lang) {
-                if (lang && lang !== 'mermaid' && hljs.getLanguage(lang)) {
-                    return hljs.highlight(code, { language: lang }).value;
-                }
-                return hljs.highlightAuto(code).value;
-            }
-        });
+        try {
+            const resp = await fetch('/console/docs/raw/' + filename);
+            if (!resp.ok) throw new Error("Document not found");
+            let text = await resp.text();
 
-        document.getElementById('md-viewer').addEventListener('click', function(e) {
-            let container = e.target.closest('.mermaid-container');
-            if (container) {
-                container.classList.toggle('mermaid-fullscreen');
-            }
-        });
-
-        loadDoc('index.md');
-    });
-
-    function loadDoc(filename) {
-        document.getElementById('md-viewer').innerHTML = '<p class="text-cyan-400 animate-pulse font-mono">Reading ' + filename + ' from engine memory...</p>';
-
-        fetch('/console/docs/raw/' + filename)
-            .then(response => {
-                if (!response.ok) throw new Error("Document not found in engine memory");
-                return response.text();
-            })
-            .then(text => {
-                text = text.replace(/src="assets\//g, 'src="/console/docs/raw/assets/');
-                text = text.replace(/src="\.\.\/\.\.\/docs\/assets\//g, 'src="/console/docs/raw/assets/');
-
-                document.getElementById('md-viewer').innerHTML = marked.parse(text);
-
-                mermaid.run({ querySelector: '.mermaid' }).catch(err => console.error("Mermaid Render Error:", err));
-            })
-            .catch(err => {
-                document.getElementById('md-viewer').innerHTML = '<p class="text-red-400 font-mono">Error: ' + err.message + '</p>';
+            // Mermaid
+            const blocks = [];
+            text = text.replace(/```mermaid\s*([\s\S]*?)\s*```/g, (match, code) => {
+                const id = `MERMAID_${blocks.length}`;
+                blocks.push(`<div class="mermaid-wrapper" onclick="toggleZoom(this)"><div class="mermaid">${code}</div></div>`);
+                return id;
             });
+
+            text = text.replace(/\(assets\//g, '(/console/docs/raw/assets/');
+            text = text.replace(/src=["']assets\//g, 'src="/console/docs/raw/assets/');
+
+            let html = marked.parse(text);
+            blocks.forEach((b, i) => html = html.replace(`MERMAID_${i}`, b));
+
+            viewer.innerHTML = html;
+
+            // Mermaid & Highlight JS
+            const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark';
+            mermaid.initialize({ startOnLoad: false, theme: theme });
+            mermaid.run({ querySelector: '.mermaid' }).catch(console.error);
+            viewer.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+        } catch (err) {
+            viewer.innerHTML = `<p class="text-rose-400 font-mono">Error: ${err.message}</p>`;
+        }
     }
+
+    //render first doc on load
+    window.onload = () => loadDoc('index.md');
 </script>
-
-<style>
-    .prose h1 { font-size: 2.25rem; font-weight: 700; margin-bottom: 1rem; color: #f3f4f6; }
-    .prose h2 { font-size: 1.5rem; font-weight: 600; margin-top: 2rem; margin-bottom: 1rem; color: #e5e7eb; border-bottom: 1px solid #374151; padding-bottom: 0.5rem;}
-    .prose h3 { font-size: 1.25rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: #d1d5db; }
-    .prose p { margin-bottom: 1.25rem; line-height: 1.75; color: #9ca3af; }
-    .prose ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1.25rem; color: #9ca3af; }
-    .prose ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1.25rem; color: #9ca3af; }
-    .prose a { color: #22d3ee; text-decoration: none; }
-    .prose a:hover { text-decoration: underline; }
-    .prose code { background-color: #374151; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.875em; color: #f87171;}
-    .prose pre { background-color: #1f2937; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1.25rem; border: 1px solid #374151;}
-    .prose pre code { background-color: transparent; padding: 0; color: inherit; }
-    .prose table { width: 100%; border-collapse: collapse; margin-bottom: 1.25rem; }
-    .prose th, .prose td { border: 1px solid #374151; padding: 0.75rem; text-align: left; color: #9ca3af;}
-    .prose th { background-color: #1f2937; font-weight: 600; color: #d1d5db; }
-    .prose blockquote { border-left: 4px solid #4b5563; padding-left: 1rem; color: #9ca3af; font-style: italic; margin-bottom: 1.25rem; }
-    .prose img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 1rem 0; }
-
-    /* YENİ: Mermaid Zoom & Tam Ekran Efektleri */
-    .mermaid-container {
-        cursor: zoom-in;
-        background-color: #1f2937; /* bg-gray-800 */
-        border: 1px solid #374151;
-        border-radius: 0.5rem;
-        padding: 1rem;
-        margin-bottom: 1.5rem;
-        overflow-x: auto;
-        text-align: center;
-        transition: all 0.3s ease;
-    }
-    .mermaid-container:hover {
-        border-color: #06b6d4; /* Neon cyan */
-        box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
-    }
-    .mermaid-fullscreen {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        background-color: rgba(17, 24, 39, 0.96) !important; /* Koyu saydam arkaplan */
-        z-index: 9999 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        padding: 2rem !important;
-        cursor: zoom-out !important;
-        border: none !important;
-        border-radius: 0 !important;
-    }
-    .mermaid-fullscreen .mermaid {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .mermaid-fullscreen svg {
-        max-width: 95vw !important;
-        max-height: 95vh !important;
-        width: auto !important;
-        height: auto !important;
-    }
-</style>
 {{ end }}
