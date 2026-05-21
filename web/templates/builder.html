@@ -1,199 +1,65 @@
 {{ define "builder_content" }}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-
-<div class="flex h-full gap-6">
-    <div class="w-1/2 flex flex-col h-full bg-gray-800 border border-gray-700 rounded-lg p-6 overflow-y-auto relative">
-        <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4 sticky top-0 bg-gray-800 z-10">
+<div class="flex h-full gap-6 text-slate-300">
+    <div class="w-1/2 flex flex-col h-full bg-[#1f2226] border border-[#30363d] rounded-xl p-6 overflow-y-auto shadow-md">
+        <div class="flex justify-between items-center mb-6 pb-4 border-b border-[#30363d] bg-[#1f2226] z-10">
             <div>
-                <h2 class="text-xl font-bold text-cyan-400">Chaos Blueprint</h2>
-                <p class="text-xs text-gray-400 mt-1">Design policies without writing YAML</p>
+                <h2 class="text-lg font-bold text-slate-100 font-mono tracking-tight">Declarative Designer</h2>
+                <p class="text-[11px] text-slate-500 font-mono mt-1 uppercase tracking-widest">Target Profile Configurations</p>
             </div>
-            <button onclick="addPolicy()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded text-sm font-bold shadow transition-all">+ Add Policy</button>
+            <button onclick="window.BuilderEngine.addPolicy()" class="bg-[#2c2f36] border border-[#30363d] text-slate-200 hover:text-white px-4 py-2 rounded text-xs font-mono font-bold transition-colors shadow-sm">+ Add Unit</button>
         </div>
 
-        <div id="policies-container" class="space-y-6">
+        <div class="bg-[#161719] border border-[#30363d] p-5 rounded-lg mb-6 border-l-4 border-l-[#56a4ff] shadow-inner">
+            <h3 class="text-[10px] font-mono text-slate-400 mb-4 uppercase tracking-widest font-bold">Global Safety Constraints</h3>
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-[10px] text-slate-500 mb-2 font-mono uppercase font-bold">Warmup Delay</label>
+                    <input id="warmup-duration" type="text" value="5s" oninput="window.BuilderEngine.updateGlobal('warmup_duration', this.value)" class="w-full bg-[#1f2226] border border-[#30363d] rounded px-3 py-2 text-sm font-mono text-slate-200 outline-none focus:border-[#56a4ff] transition-colors shadow-sm">
+                    <p class="text-[10px] text-slate-500 mt-1 font-mono">Delay before policy activation (e.g., 5s, 500ms).</p>
+                </div>
+                <div class="flex items-center mt-6">
+                    <label class="flex items-center cursor-pointer select-none">
+                        <input id="enable-default-ignored" type="checkbox" checked onchange="window.BuilderEngine.updateGlobal('enable_default_ignored', this.checked)" class="form-checkbox h-4 w-4 border-[#30363d] rounded bg-[#1f2226] text-[#56a4ff] focus:ring-0">
+                        <span class="ml-3 text-[11px] text-slate-300 font-mono uppercase font-bold tracking-wide">Core Safety Shield</span>
+                    </label>
+                    <span class="text-[10px] text-slate-500 font-mono ml-3">Protects critical operations by default.</span>
+                </div>
+            </div>
         </div>
+
+        <div id="policies-container" class="space-y-5"></div>
+        <datalist id="discovered-targets"></datalist>
     </div>
 
-    <div class="w-1/2 flex flex-col h-full bg-gray-900 border border-gray-700 rounded-lg p-0 overflow-hidden shadow-2xl">
-        <div class="bg-gray-800 p-4 border-b border-gray-700 flex justify-between items-center">
-            <h3 class="font-mono text-gray-300">pastaay.yaml (Live Preview)</h3>
-            <div class="flex gap-2">
-                <input type="password" id="webhook-token" placeholder="Webhook Token..." class="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-red-500 font-mono">
-                <button onclick="deployToEngine()" class="bg-red-600 hover:bg-red-500 text-white px-4 py-1 rounded text-sm font-bold shadow flex items-center gap-2 transition-all">
-                    <span>🚀 Deploy to Engine</span>
+    <div class="w-1/2 flex flex-col h-full bg-[#1f2226] border border-[#30363d] rounded-xl p-0 overflow-hidden shadow-md">
+        <div class="bg-[#161719] p-4 border-b border-[#30363d] flex justify-between items-center">
+            <h3 class="font-mono text-slate-400 text-xs uppercase tracking-widest font-bold">Deploy Strategy Payload</h3>
+            <div class="flex gap-3">
+                <input type="password" id="webhook-token" placeholder="Security Token..." class="bg-[#1f2226] border border-[#30363d] rounded px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-[#56a4ff] font-mono transition-colors shadow-inner">
+                <button onclick="window.BuilderEngine.deployToEngine(this)" class="bg-[#2c2f36] hover:bg-[#30363d] border border-[#30363d] text-white px-5 py-1.5 rounded text-[11px] font-mono font-bold uppercase tracking-widest transition-colors shadow-sm">
+                    Deploy
+                </button>
+                <button onclick="window.BuilderEngine.rollback(this)" class="bg-amber-950/40 border border-amber-900/50 hover:bg-amber-900 text-amber-400 hover:text-white px-4 py-1.5 rounded text-[11px] font-mono font-bold transition-colors shadow-sm" title="Revert to Previous YAML">
+                    ROLLBACK
                 </button>
             </div>
         </div>
-        <div class="flex-1 p-4 overflow-y-auto relative">
-            <pre><code id="yaml-preview" class="language-yaml text-sm font-mono text-cyan-200 bg-transparent"></code></pre>
+
+        <div class="flex-1 p-5 overflow-y-auto bg-[#0d1117] shadow-inner">
+            <pre class="m-0 whitespace-pre-wrap"><code id="yaml-preview" class="language-yaml hljs text-sm font-mono !bg-transparent leading-relaxed"></code></pre>
+        </div>
+
+        <div class="bg-[#161719] p-5 border-t border-[#30363d] flex flex-col gap-3 h-56 flex-none">
+            <div class="flex justify-between items-center border-b border-[#30363d] pb-2.5">
+                <span class="text-xs font-mono text-slate-400 uppercase tracking-widest font-bold">Blast Radius Validation Guard</span>
+                <span id="risk-badge" class="px-3 py-1 rounded text-[10px] font-mono font-bold tracking-widest bg-[#2c2f36] text-emerald-400 border border-[#30363d]">AWAITING DATA</span>
+            </div>
+            <div id="lint-issues" class="text-xs font-mono text-slate-400 overflow-y-auto flex-1 pr-2">
+                <div class="text-slate-500">System baseline loaded. Awaiting policy generation...</div>
+            </div>
         </div>
     </div>
 </div>
+<script type="module" src="/static/js/builder.js"></script>
 
-<script>
-    // Config State
-    let configState = {
-        version: 1,
-        warmup_duration: "5s",
-        policies: []
-    };
-
-    function addPolicy() {
-        configState.policies.push({
-            name: 'policy-' + Math.floor(Math.random() * 1000),
-            type: 'http',
-            target: 'all',
-            latency_chance: 0.0,
-            latency_duration: '0s',
-            error_chance: 0.0,
-            error_code: 0,
-            drop_connection: false
-        });
-        renderUI();
-    }
-
-    function removePolicy(index) {
-        configState.policies.splice(index, 1);
-        renderUI();
-    }
-
-    function updateField(index, field, value, type) {
-        if(type === 'float') value = parseFloat(value) || 0.0;
-        if(type === 'int') value = parseInt(value) || 0;
-        if(type === 'bool') value = value === 'true';
-
-        configState.policies[index][field] = value;
-
-        if(field === 'type' && value !== 'http' && value !== 'grpc') {
-            delete configState.policies[index].error_code;
-        }
-
-        updateYAML();
-    }
-
-    function renderUI() {
-        const container = document.getElementById('policies-container');
-        container.innerHTML = '';
-
-        if(configState.policies.length === 0) {
-            container.innerHTML = '<div class="text-center p-8 border-2 border-dashed border-gray-700 rounded-lg text-gray-500">No policies defined. Click "Add Policy" to start.</div>';
-        }
-
-        configState.policies.forEach((pol, idx) => {
-            container.innerHTML += `
-                <div class="bg-gray-900 border border-gray-700 p-4 rounded-lg shadow-lg relative group">
-                    <button onclick="removePolicy(${idx})" class="absolute top-2 right-2 text-gray-500 hover:text-red-500">✖</button>
-
-                    <div class="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">Name</label>
-                            <input type="text" value="${pol.name}" oninput="updateField(${idx}, 'name', this.value, 'string')" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-sm focus:border-cyan-500 outline-none">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-gray-400 mb-1">Protocol Type</label>
-                            <select onchange="updateField(${idx}, 'type', this.value, 'string')" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-sm focus:border-cyan-500 outline-none">
-                                <option value="http" ${pol.type==='http'?'selected':''}>HTTP</option>
-                                <option value="sql" ${pol.type==='sql'?'selected':''}>SQL / DB</option>
-                                <option value="grpc" ${pol.type==='grpc'?'selected':''}>gRPC</option>
-                                <option value="redis" ${pol.type==='redis'?'selected':''}>Redis</option>
-                                <option value="mongo" ${pol.type==='mongo'?'selected':''}>MongoDB</option>
-                                <option value="kafka" ${pol.type==='kafka'?'selected':''}>Kafka</option>
-                                <option value="resource" ${pol.type==='resource'?'selected':''}>Resource Sabotage</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="mb-4">
-                        <label class="block text-xs text-gray-400 mb-1">Target (Endpoint/Query/Topic or "all")</label>
-                        <input type="text" value="${pol.target}" oninput="updateField(${idx}, 'target', this.value, 'string')" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-sm focus:border-cyan-500 outline-none">
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-4 bg-gray-800 p-3 rounded border border-gray-700">
-                        <div>
-                            <label class="block text-xs text-cyan-400 mb-1">Latency Chance (0-1.0)</label>
-                            <input type="number" step="0.1" max="1.0" min="0" value="${pol.latency_chance}" oninput="updateField(${idx}, 'latency_chance', this.value, 'float')" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-cyan-400 mb-1">Latency Duration</label>
-                            <input type="text" placeholder="e.g. 500ms" value="${pol.latency_duration}" oninput="updateField(${idx}, 'latency_duration', this.value, 'string')" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-red-400 mb-1">Error Chance (0-1.0)</label>
-                            <input type="number" step="0.1" max="1.0" min="0" value="${pol.error_chance}" oninput="updateField(${idx}, 'error_chance', this.value, 'float')" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-red-400 mb-1">Drop Connection</label>
-                            <select onchange="updateField(${idx}, 'drop_connection', this.value, 'bool')" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white text-sm">
-                                <option value="false" ${!pol.drop_connection?'selected':''}>False</option>
-                                <option value="true" ${pol.drop_connection?'selected':''}>True (Instant Kill)</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        updateYAML();
-    }
-
-    function updateYAML() {
-        // Clean empty/zero fields from output for a beautiful YAML
-        const cleanConfig = JSON.parse(JSON.stringify(configState));
-        cleanConfig.policies.forEach(p => {
-            if(p.latency_chance === 0) delete p.latency_duration;
-            if(p.error_chance === 0) { delete p.error_code; delete p.error_body; }
-            if(!p.drop_connection) delete p.drop_connection;
-        });
-
-        const yamlString = jsyaml.dump(cleanConfig, { indent: 2, lineWidth: -1 });
-        const codeBlock = document.getElementById('yaml-preview');
-        codeBlock.textContent = yamlString;
-        delete codeBlock.dataset.highlighted; // Reset highlight.js
-        hljs.highlightElement(codeBlock);
-    }
-
-    function deployToEngine() {
-        const token = document.getElementById('webhook-token').value;
-        const yamlData = document.getElementById('yaml-preview').textContent;
-        const btn = event.currentTarget;
-        const originalText = btn.innerHTML;
-
-        btn.innerHTML = 'Deploying...';
-        btn.disabled = true;
-
-        fetch('/chaos/webhook', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/yaml',
-                'X-Pastaay-Token': token
-            },
-            body: yamlData
-        })
-            .then(async response => {
-                const resData = await response.json();
-                if (response.ok) {
-                    btn.innerHTML = '✔ Success!';
-                    btn.classList.replace('bg-red-600', 'bg-green-600');
-                } else {
-                    alert("Engine Rejected Payload: " + (resData.message || response.statusText) + "\n" + (resData.details || ""));
-                    btn.innerHTML = '✖ Failed';
-                }
-                setTimeout(() => {
-                    btn.innerHTML = originalText;
-                    btn.classList.replace('bg-green-600', 'bg-red-600');
-                    btn.disabled = false;
-                }, 3000);
-            })
-            .catch(err => {
-                alert("Network Error: " + err.message);
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            });
-    }
-
-    // Init
-    window.onload = () => { renderUI(); };
-</script>
 {{ end }}
