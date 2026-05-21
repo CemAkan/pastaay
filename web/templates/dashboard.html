@@ -1,183 +1,114 @@
 {{ define "content" }}
-<div hx-get="/console/api/dashboard" hx-trigger="load, every 2s" hx-swap="innerHTML">
-    <div class="flex items-center justify-center h-24">
-        <p class="text-cyan-400 animate-pulse font-mono">Synchronizing telemetry...</p>
-    </div>
-</div>
+<div class="flex flex-col h-full space-y-6">
+    <div class="flex justify-between items-center border-b border-[#30363d] pb-4">
+        <div class="flex items-center gap-5">
+            <img src="/static/assets/overview_banner.gif" alt="Overview" class="h-8 w-auto object-contain brand-logo">
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6 mb-8">
-    <div class="bg-gray-800 p-4 rounded shadow border border-gray-700 col-span-1 flex flex-col items-center">
-        <h3 class="text-gray-400 text-sm font-mono mb-2">Live Resilience Score</h3>
-        <div id="resilience-gauge" style="width: 100%; height: 250px;"></div>
-
-        <div class="w-full mt-4 px-4 bg-gray-900 p-3 rounded border border-gray-700">
-            <div class="flex justify-between mb-1">
-                <label class="text-xs text-cyan-400 font-mono">App Traffic (Tr)</label>
-                <span id="traffic-val" class="text-white font-bold text-xs">100 req/s</span>
+            <div class="flex items-center gap-3 text-xs font-mono text-slate-400 mt-1">
+                <div class="flex items-center gap-1.5">
+                    <span id="engine-status-dot" class="w-2 h-2 rounded-full bg-slate-600 transition-colors shadow-[0_0_8px_rgba(255,255,255,0.2)]"></span>
+                    <span id="engine-status-text" class="text-slate-400 font-medium">Connecting</span>
+                </div>
+                <span class="text-[#30363d]">│</span>
+                <span>Active Systems: <span id="policy-count" class="text-slate-200 font-bold">0</span></span>
+                <span class="text-[#30363d]">│</span>
+                <div class="relative inline-block text-left">
+                    <button onclick="window.toggleSensors()" class="text-slate-400 hover:text-slate-200 transition-colors focus:outline-none font-medium">
+                        Sensor Fabric: <span id="sensor-count" class="text-slate-200 font-bold">0</span> <span class="text-[9px] ml-0.5">▼</span>
+                    </button>
+                    <div id="sensors-popover" class="hidden absolute left-0 mt-3 w-56 bg-[#1f2226] border border-[#30363d] shadow-2xl rounded-md z-50 p-4">
+                        <div class="text-[10px] uppercase tracking-widest text-slate-500 font-bold border-b border-[#30363d] pb-2 mb-2.5">Diagnostics Matrix</div>
+                        <ul id="sensors-list" class="space-y-2 font-mono text-xs"></ul>
+                    </div>
+                </div>
             </div>
-            <input type="range" id="traffic-slider" min="10" max="5000" step="10" value="100" class="w-full accent-cyan-500" oninput="document.getElementById('traffic-val').innerText = this.value + ' req/s'">
+        </div>
+
+        <div class="flex gap-3 items-center">
+            <div class="relative inline-block text-left">
+                <button onclick="window.toggleAddPanel()" class="text-xs font-mono text-sky-200 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 px-4 py-2 rounded transition-colors shadow-sm font-medium focus:outline-none">
+                    + Add Panel
+                </button>
+                <div id="add-panel-popover" class="hidden absolute right-0 mt-3 w-72 bg-[#1f2226] border border-[#30363d] shadow-2xl rounded-md z-50 p-4">
+                    <div class="text-[10px] uppercase tracking-widest text-slate-500 font-bold border-b border-[#30363d] pb-2 mb-3">Mount Telemetry Block</div>
+                    <select id="widget-metric" class="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-2 text-sm font-mono text-slate-300 outline-none focus:border-[#56a4ff] transition-colors mb-3">
+                        <option value="global_rate">Global Fault Velocity</option>
+                        <option value="impact_matrix">Blast Radius Matrix</option>
+                        <option value="pinger">Resilience Probe</option>
+                        <option value="log">System Output Journal</option>
+                    </select>
+                    <button onclick="window.engine.addWidget(document.getElementById('widget-metric').value); window.toggleAddPanel();" class="w-full bg-[#2c2f36] hover:bg-[#30363d] border border-[#30363d] text-slate-200 hover:text-white font-mono text-xs py-2 rounded font-bold transition-colors">Mount Block</button>
+                </div>
+            </div>
+            <button onclick="window.abortAllChaos()" class="text-xs font-mono text-rose-300 bg-rose-950/30 hover:bg-rose-900/40 border border-rose-900/50 px-4 py-2 rounded transition-colors shadow-sm font-bold tracking-wide">
+                HALT EXPERIMENTS
+            </button>
         </div>
     </div>
 
-    <div class="bg-gray-800 p-4 rounded shadow border border-gray-700 col-span-2">
-        <h3 class="text-gray-400 text-sm font-mono mb-2">Kinetic Impact (Injected Faults)</h3>
-        <div id="impact-chart" style="width: 100%; height: 320px;"></div>
+    <div class="bg-[#1f2226] rounded-lg border border-[#30363d] flex flex-col max-h-64 overflow-hidden shadow-sm">
+        <div class="px-5 py-3 bg-[#2c2f36]/40 border-b border-[#30363d] flex justify-between items-center">
+            <span class="text-sm text-slate-300 font-mono font-semibold tracking-wide">Active Injections Pipeline</span>
+            <button onclick="window.openYamlModal()" class="text-[10px] uppercase tracking-widest font-mono font-bold text-sky-400 hover:text-sky-300 transition-colors bg-[#1f2226] px-3 py-1.5 rounded border border-[#30363d] shadow-sm">View Memory Dump</button>
+        </div>
+        <div class="flex-1 overflow-y-auto min-h-[100px]">
+            <table class="w-full text-left table-fixed">
+                <thead class="sticky top-0 bg-[#1f2226] z-10 border-b border-[#30363d] text-xs font-mono text-slate-500">
+                <tr>
+                    <th class="px-5 py-3.5 font-semibold w-1/4">IDENTIFIER</th>
+                    <th class="px-5 py-3.5 font-semibold w-1/6">PROTOCOL</th>
+                    <th class="px-5 py-3.5 font-semibold w-1/3">TARGET SCOPE</th>
+                    <th class="px-5 py-3.5 font-semibold w-1/4">BLAST VECTOR</th>
+                </tr>
+                </thead>
+                <tbody id="policies-table" class="font-mono text-sm text-slate-400 divide-y divide-[#30363d]/50 bg-[#161719]/40">
+                <tr><td colspan="4" class="px-5 py-8 text-center text-slate-500">Synchronizing orchestrator state machine...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="dashboard-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 items-start content-start min-h-0 overflow-y-auto pb-6">
+        <div id="empty-state" class="col-span-full h-40 border-2 border-dashed border-[#30363d] rounded-lg flex items-center justify-center bg-[#1f2226]/30">
+            <div class="text-center">
+                <p class="text-slate-400 font-mono text-sm uppercase tracking-widest font-bold">Telemetry grid unconfigured</p>
+                <p class="text-[10px] text-slate-500 font-mono mt-2">Add a panel to start tracking resilience and fault telemetry.</p>
+                <button onclick="window.toggleAddPanel()" class="mt-3 bg-[#21262d] border border-[#30363d] text-slate-200 hover:text-white px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase tracking-widest transition-colors">Add Panel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="yaml-modal" class="fixed inset-0 bg-[#0d1117]/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-[#1f2226] border border-[#30363d] rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div class="flex justify-between items-center px-5 py-4 border-b border-[#30363d] bg-[#161719]">
+            <h3 class="text-slate-200 font-mono text-sm uppercase tracking-widest font-bold">In-Memory Config State</h3>
+            <div class="flex items-center gap-4">
+                <button onclick="window.copyToClipboard('raw-yaml-content', this)" class="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 border border-[#30363d] px-3 py-1.5 rounded bg-[#2c2f36] hover:text-white transition-colors cursor-pointer">COPY PAYLOAD</button>
+                <button onclick="window.closeModal('yaml-modal')" class="text-slate-500 hover:text-white text-2xl font-bold leading-none transition-colors">&times;</button>
+            </div>
+        </div>
+        <div class="p-6 overflow-y-auto flex-1 bg-[#0d1117]">
+            <pre class="m-0 whitespace-pre-wrap"><code id="raw-yaml-content" class="language-yaml hljs text-sm font-mono !bg-transparent !p-0 leading-relaxed shadow-inner"></code></pre>
+        </div>
     </div>
 </div>
 
 <script>
-    document.addEventListener("DOMContentLoaded", function() {
-        var barChart = echarts.init(document.getElementById('impact-chart'), 'dark', { backgroundColor: 'transparent' });
-        var gaugeChart = echarts.init(document.getElementById('resilience-gauge'), 'dark', { backgroundColor: 'transparent' });
-
-        barChart.setOption({
-            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-            grid: { left: '3%', right: '5%', bottom: '3%', containLabel: true },
-            xAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151', type: 'dashed' } } },
-            yAxis: { type: 'category', data: [], axisLabel: { color: '#9CA3AF', fontFamily: 'monospace' } },
-            series: [{ name: 'Faults', type: 'bar', itemStyle: { color: '#ef4444', borderRadius: [0, 4, 4, 0] }, data: [] }]
-        });
-
-        gaugeChart.setOption({
-            series: [{
-                type: 'gauge',
-                startAngle: 180, endAngle: 0, min: 0, max: 100,
-                pointer: { show: true },
-                progress: { show: true, overlap: false, roundCap: true, clip: false },
-                axisLine: { lineStyle: { width: 15 } },
-                splitLine: { show: false },
-                axisTick: { show: false },
-                axisLabel: { show: false },
-                detail: { width: 50, height: 14, fontSize: 32, color: 'auto', formatter: '{value}' },
-                data: [{ value: 100, name: 'Score' }]
-            }]
-        });
-
-        let lastMetrics = {};
-        let lastTime = Date.now();
-
-        setInterval(() => {
-            fetch('/console/api/chart')
-                .then(res => res.json())
-                .then(data => {
-                    if (!data) return;
-
-                    let now = Date.now();
-                    let deltaSec = (now - lastTime) / 1000.0;
-                    lastTime = now;
-
-                    let errorRate = 0;
-                    let latencyRate = 0;
-
-                    let targets = {};
-
-                    data.forEach(m => {
-                        let key = m.target + "_" + m.type;
-                        let currentVal = m.value;
-                        let prevVal = lastMetrics[key] !== undefined ? lastMetrics[key] : currentVal;
-                        let rate = Math.max(0, (currentVal - prevVal) / deltaSec);
-                        lastMetrics[key] = currentVal;
-
-                        if (m.type === "error" || m.type === "drop") errorRate += rate;
-                        if (m.type === "latency") latencyRate += rate;
-
-                        targets[m.target] = (targets[m.target] || 0) + currentVal;
-                    });
-
-                    // Resilience Score Calculation
-                    let tr = parseFloat(document.getElementById('traffic-slider').value);
-                    let penalty = ((1.5 * errorRate) + (0.5 * latencyRate)) / tr;
-                    let score = (1.0 - penalty) * 100;
-
-                    score = Math.max(0, Math.min(100, score));
-
-                    let color = '#22c55e';
-                    if (score < 50) color = '#ef4444';
-                    else if (score < 80) color = '#eab308';
-
-                    gaugeChart.setOption({
-                        series: [{
-                            data: [{ value: score.toFixed(1) }],
-                            progress: { itemStyle: { color: color } },
-                            detail: { color: color }
-                        }]
-                    });
-
-                    let labels = Object.keys(targets);
-                    let values = Object.values(targets);
-                    barChart.setOption({ yAxis: { data: labels }, series: [{ data: values }] });
-                })
-                .catch(err => console.error("Metrics fetch error:", err));
-        }, 2000);
-
-        window.addEventListener('resize', function() { barChart.resize(); gaugeChart.resize(); });
-    });
+    window.safeCall = function(fnName, ...args) {
+        if (window.engine && typeof window.engine[fnName] === 'function') {
+            window.engine[fnName](...args);
+        } else {
+            console.warn(`Engine not ready, queuing command: ${fnName}`);
+            window.addEventListener('engineReady', () => {
+                if (window.engine && typeof window.engine[fnName] === 'function') {
+                    window.engine[fnName](...args);
+                }
+            }, { once: true });
+        }
+    }
 </script>
-{{ end }}
 
-{{ define "dashboard_content" }}
-<div>
-    <h2 class="text-2xl font-semibold mb-4">Fleet Status</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div class="bg-gray-800 p-4 rounded shadow border border-gray-700 transition-all duration-300">
-            <h3 class="text-gray-400 text-sm font-mono">Active Policies</h3>
-            <p class="text-3xl font-bold text-white">{{ .ActiveCount }}</p>
-        </div>
-        <div class="bg-gray-800 p-4 rounded shadow border border-gray-700">
-            <h3 class="text-gray-400 text-sm font-mono">Engine Status</h3>
-            <p class="text-3xl font-bold text-green-400 flex items-center gap-2">
-                <span class="w-3 h-3 rounded-full bg-green-400 animate-ping"></span> Online
-            </p>
-        </div>
-        <div class="bg-gray-800 p-4 rounded shadow border border-gray-700">
-            <h3 class="text-gray-400 text-sm font-mono">Connected Sensors</h3>
-            <p class="text-3xl font-bold text-white">{{ .SensorCount }}</p>
-        </div>
-    </div>
+<script type="module" src="/static/js/dashboard.js"></script>
 
-    <h2 class="text-xl font-semibold mb-4 text-gray-200">Active Experiments</h2>
-    <div class="bg-gray-800 rounded shadow border border-gray-700 overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-700">
-            <thead class="bg-gray-900">
-            <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Policy Name</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Protocol</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Target</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Blast Radius (Payload)</th>
-            </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-700 bg-gray-800">
-            {{ if not .Policies }}
-            <tr>
-                <td colspan="4" class="px-6 py-8 text-center text-sm text-gray-500 font-mono">
-                    No active chaos policies. System is pristine.
-                </td>
-            </tr>
-            {{ else }}
-            {{ range .Policies }}
-            <tr class="hover:bg-gray-700 transition-colors">
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-white">{{ .Name }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-cyan-400 font-mono">{{ .Type }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{{ .Target }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-red-400">
-                    {{ if .DropConnection }}
-                    <span class="block">⚡ Drop Connection</span>
-                    {{ end }}
-                    {{ if gt .ErrorChance 0.0 }}
-                    <span class="block">✘ Error ({{ .ErrorCode }})</span>
-                    {{ end }}
-                    {{ if gt .LatencyChance 0.0 }}
-                    <span class="block">⏱ Latency ({{ .LatencyDuration }})</span>
-                    {{ end }}
-                    {{ if eq .Type "resource" }}
-                    <span class="block">⚔ Resource Sabotage</span>
-                    {{ end }}
-                </td>
-            </tr>
-            {{ end }}
-            {{ end }}
-            </tbody>
-        </table>
-    </div>
-</div>
 {{ end }}

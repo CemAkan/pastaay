@@ -4,37 +4,148 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pastaay | Command Center</title>
-    <link rel="icon" type="image/png" href="/console/docs/raw/assets/favicon.png">
+    <link rel="icon" type="image/png" href="/static/assets/favicon.png">
+
+    <style>
+        html { opacity: 0; transition: opacity 0.3s ease-in-out; background-color: #0d1117; }
+        html.loaded { opacity: 1; }
+    </style>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        window.addEventListener('DOMContentLoaded', () => {
+            document.documentElement.classList.add('loaded');
+        });
+        setTimeout(() => { document.documentElement.classList.add('loaded'); }, 400);
+    </script>
 
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-900 text-gray-100 font-sans antialiased">
-<div class="flex h-screen overflow-hidden">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.11/purify.min.js"></script>
 
-    <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
-        <div class="p-4 border-b border-gray-700 flex flex-col items-center">
-            <img src="/console/docs/raw/assets/pastaay_logo.png" alt="Pastaay Engine" class="w-48 mb-2">
-            <p class="text-xs text-gray-400 tracking-widest uppercase">Command Center</p>
+    <link rel="stylesheet" href="/static/css/style.css">
+
+    <style>
+        body { background-color: var(--bg-base); color: var(--text-primary); transition: background-color 0.3s; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: var(--bg-base); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+    </style>
+</head>
+<body class="font-sans antialiased selection:bg-slate-700">
+
+<div class="flex h-screen overflow-hidden w-full relative">
+
+    <aside id="main-sidebar" class="w-64 bg-[#161b22] border-r border-[#30363d] flex flex-col shadow-sm z-50 transition-all duration-300 ease-in-out shrink-0 relative overflow-visible">
+
+        <button onclick="document.getElementById('main-sidebar').classList.toggle('w-64'); document.getElementById('main-sidebar').classList.toggle('w-0');"
+                class="sidebar-toggle-btn">
+            <svg class="w-4 h-4 -ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+        </button>
+
+        <div class="sidebar-content w-full p-5 border-b border-[#30363d] flex flex-col items-center bg-[#0d1117]/50 overflow-hidden whitespace-nowrap">
+            <img src="/static/assets/pastaay_banner.gif" alt="Pastaay Engine" class="h-14 w-auto object-contain mb-2 drop-shadow-sm brand-logo">
         </div>
-        <nav class="flex-1 p-4 space-y-2">
-            <a href="/console" class="block px-4 py-2 rounded {{ if eq .Page "dashboard" }}bg-gray-700 text-white{{ else }}text-gray-400 hover:bg-gray-700 hover:text-white{{ end }}">Dashboard</a>
-            <a href="/console/builder" class="block px-4 py-2 rounded {{ if eq .Page "builder" }}bg-gray-700 text-white border-l-2 border-red-500{{ else }}text-gray-400 hover:bg-gray-700 hover:text-white{{ end }}">Visual Builder</a>
-            <a href="/console/docs" class="block px-4 py-2 rounded {{ if eq .Page "docs" }}bg-gray-700 text-white{{ else }}text-gray-400 hover:bg-gray-700 hover:text-white{{ end }}">Documentation</a>
+
+        <nav class="sidebar-content w-full flex-1 p-3 space-y-1 overflow-hidden whitespace-nowrap">
+            <a href="/console" class="block px-4 py-2.5 text-xs font-mono rounded-md transition-colors {{ if eq .Page "dashboard" }}bg-[#21262d] text-white font-semibold border-l-4 border-sky-400{{ else }}text-slate-400 hover:bg-[#21262d] hover:text-white{{ end }}">Overview</a>
+            <a href="/console/builder" class="block px-4 py-2.5 text-xs font-mono rounded-md transition-colors {{ if eq .Page "builder" }}bg-[#21262d] text-white font-semibold border-l-4 border-sky-400{{ else }}text-slate-400 hover:bg-[#21262d] hover:text-white{{ end }}">Designer</a>
+            <a href="/console/docs" class="block px-4 py-2.5 text-xs font-mono rounded-md transition-colors {{ if eq .Page "docs" }}bg-[#21262d] text-white font-semibold border-l-4 border-sky-400{{ else }}text-slate-400 hover:bg-[#21262d] hover:text-white{{ end }}">Docs</a>
         </nav>
+
+        <div class="theme-toggle-container mt-auto mb-4 ml-4">
+            <button onclick="window.toggleTheme()" class="p-2 rounded-full bg-[var(--bg-base)] border border-[var(--border-color)] text-slate-400 hover:text-sky-400 transition-all shadow-md">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                </svg>
+            </button>
+        </div>
     </aside>
 
-    <main class="flex-1 overflow-y-auto p-8" id="main-content">
-        {{ if eq .Page "dashboard" }}
-        {{ template "content" . }}
-        {{ else if eq .Page "docs" }}
-        {{ template "docs_content" . }}
-        {{ else if eq .Page "builder" }}
-        {{ template "builder_content" . }}
+    <main class="flex-1 overflow-y-auto p-6 bg-[#0d1117] relative z-0 w-full" id="main-content">
+        {{ if eq .Page "dashboard" }} {{ template "content" . }}
+        {{ else if eq .Page "docs" }} {{ template "docs_content" . }}
+        {{ else if eq .Page "builder" }} {{ template "builder_content" . }}
         {{ end }}
     </main>
-
 </div>
+
+<div id="info-dialog" class="fixed top-24 right-6 bg-[#1f2226] border border-[#30363d] shadow-2xl rounded-xl z-[100] p-5 w-80 hidden transform scale-95 transition-all duration-150">
+    <button onclick="window.closeInfoDialog()" class="absolute top-3 right-3 text-slate-500 hover:text-white text-base font-bold transition-colors focus:outline-none">&times;</button>
+    <h3 id="info-dialog-title" class="text-sky-400 font-mono text-[11px] uppercase tracking-widest font-bold mb-3 pr-4 flex items-center gap-1.5 border-b border-[#30363d] pb-2"></h3>
+    <div class="text-[11px] text-slate-300 font-sans leading-relaxed space-y-2 overflow-y-auto max-h-[40vh] pr-1" id="info-dialog-content"></div>
+</div>
+
+{{ if eq .Page "dashboard" }}
+<div class="fixed bottom-6 right-6 z-50 flex flex-col items-end font-mono">
+    <div id="oracle-window" class="hidden w-[550px] h-[600px] bg-[#161b22] border border-[#30363d] shadow-2xl rounded-xl flex flex-col mb-4 overflow-hidden">
+        <div class="flex justify-between items-center px-4 py-3 bg-[#0d1117] border-b border-[#30363d]">
+            <span class="text-xs font-bold text-slate-200 tracking-wider flex items-center gap-2">
+                <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                ORACLE ENGINE
+            </span>
+            <div class="flex gap-4 items-center">
+                <button onclick="window.clearOracle()" class="text-[10px] text-slate-500 hover:text-slate-200 transition-colors uppercase tracking-wider font-bold">Clear</button>
+                <button onclick="window.toggleOracle()" class="text-slate-500 hover:text-rose-400 transition-colors text-xl leading-none font-bold">&times;</button>
+            </div>
+        </div>
+
+        <div class="p-2 border-b border-[#30363d] flex gap-2 bg-[#161b22]">
+            <select id="oracle-provider" onchange="window.updateOracleModelPlaceholder()" class="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 text-[10px] text-slate-400 outline-none">
+                <option value="openai">OpenAI</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="gemini">Gemini</option>
+                <option value="anthropic">Anthropic</option>
+            </select>
+            <select id="oracle-intensity" class="bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 text-[10px] text-slate-400 outline-none text-rose-400 font-bold">
+                <option value="low">Low (Mild)</option>
+                <option value="medium" selected>Medium (Standard)</option>
+                <option value="high">High (Destructive)</option>
+                <option value="nuke" class="text-rose-500">NUKE (Annihilation)</option>
+            </select>
+            <input type="password" id="oracle-key" placeholder="API Key" class="w-24 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 text-[10px] text-slate-400 outline-none focus:border-slate-500">
+            <input type="text" id="oracle-model" placeholder="Model Override" class="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5 text-[10px] text-slate-400 outline-none focus:border-slate-500">
+        </div>
+
+        <div class="flex-1 flex min-h-0 bg-[#0d1117]">
+            <div id="oracle-chat" class="w-1/2 overflow-y-auto p-4 text-[11px] space-y-4 text-slate-400 border-r border-[#30363d]">
+                <div class="text-slate-500 flex items-center gap-2"><span>SYS ┠ Ready. Enter prompt or run autonomous scan.</span></div>
+            </div>
+            <div class="w-1/2 bg-[#161b22]/50 flex flex-col h-full overflow-hidden">
+                <div class="bg-[#0d1117] px-3 py-2 flex justify-between items-center border-b border-[#30363d]">
+                    <span class="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Synthesized YAML</span>
+                </div>
+                <div class="flex-1 overflow-auto p-3">
+                    <pre class="m-0 whitespace-pre-wrap"><code id="oracle-yaml-preview" class="language-yaml hljs text-[10px] font-mono leading-relaxed">Awaiting generation...</code></pre>
+                </div>
+                <div id="oracle-action-panel" class="hidden p-2 border-t border-[#30363d] bg-[#161b22] flex gap-2">
+                    <button onclick="window.deployOracleConfig(this)" class="flex-1 bg-slate-700 text-white text-[10px] font-bold py-1.5 rounded hover:bg-slate-600 transition-colors uppercase">Deploy</button>
+                    <button onclick="window.discardOracleConfig()" class="border border-[#30363d] text-slate-400 text-[10px] px-2 py-1.5 rounded bg-[#0d1117] hover:bg-slate-800 transition-colors uppercase">Discard</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-3 border-t border-[#30363d] bg-[#161b22] flex gap-2">
+            <input type="text" id="oracle-prompt" placeholder="Request scenario or trigger auto-scan..." class="flex-1 bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs text-slate-300 outline-none focus:border-slate-500" onkeypress="if(event.key === 'Enter') window.sendOraclePrompt()">
+            <button onclick="window.sendOraclePrompt()" id="oracle-btn" class="bg-[#21262d] border border-[#30363d] hover:bg-slate-700 text-white font-bold px-4 py-1.5 rounded text-xs transition-colors">Run</button>
+        </div>
+    </div>
+
+    <button onclick="window.toggleOracle()" class="relative bg-[#161b22] border border-[#30363d] hover:border-sky-500/50 text-zinc-300 px-5 py-3.5 rounded-full text-xs shadow-[0_0_15px_rgba(0,0,0,0.5)] transition-all flex items-center gap-2 font-bold group">
+        <span class="absolute left-3.5 flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-sky-500"></span>
+        </span>
+        <span class="ml-4">Oracle Agent</span>
+    </button>
+</div>
+{{ end }}
+
+<script src="/static/js/core.js"></script>
 </body>
 </html>
