@@ -23,6 +23,7 @@
 * **Kinetic Control Plane:** Fleet-wide orchestration via the **`pastaayctl`** CLI, featuring imperative strikes, SLA-guarded autopilot, and real-time telemetry dashboards.
 * **Distributed Tracing:** Zero-allocation OpenTelemetry (OTLP) integration for visualizing chaos events across microservices without goroutine leaks.
 * **Self-Aware Sensors:** Real-time health monitoring and asynchronous telemetry for remote control providers.
+* **Web Console:** Centralized dashboard with real-time telemetry grid, drag-and-drop policy builder, and the **Resilience Probe** — an Apdex-based system resilience monitor with server-side proxy probing and diagnostic field popovers.
 
 **Cloud-Native & GitOps**
 * **Kubernetes Native:** Seamlessly manage chaos via Custom Resource Definitions (`ChaosPolicy`) powered by the Pastaay Operator.
@@ -78,6 +79,37 @@ Pastaay is a continuously evolving enterprise chaos engineering suite. Our devel
 | **Current (v2.3)** | **Web Console** | Centralized web dashboard for direct fleet management, visual impact analysis, and interactive documentation. |
 | **Next**           | **CEL-Driven Rule Engine** | **Dynamic Evaluation:** Integrating Google's Common Expression Language (CEL) to allow complex, AST-compiled conditional chaos rules (e.g., payload limits, header regex) with zero-allocation overhead. |
 | **Future**         | **Trace-Aware Injection** | **Context-Propagated Chaos:** Leveraging OpenTelemetry Baggage to inject faults based on the complete distributed request journey, targeting specific end-to-end transaction flows across the fleet. |
+
+## Web Console
+
+Pastaay v2.3 introduces a fully client-side **Web Console**, a real-time observability hub served directly from the engine's embedded filesystem at `http://localhost:2112/console`. No external dependencies, no Node.js, no React.
+
+<p align="center">
+  <img src="docs/assets/web_console_demo.gif" width="850" alt="Pastaay Web Console Demo">
+</p>
+
+**Telemetry Panels**, A modular, drag-and-drop grid with persistent layout:
+
+* **Global Fault Velocity:** Real-time line chart of total fault injection rate (req/s). Powered by ECharts, reading `pastaay_injected_faults_total` directly from the engine's Prometheus gatherer.
+* **Blast Radius Matrix:** Stacked bar chart correlating errors, latency spikes, and dropped connections across the top 5 most-targeted services.
+* **System Output Journal:** Lock-free circular log viewer with hierarchical filtering (Pod → Protocol → Method), text search, live/pause toggle, and click-to-decrypt payload tracing. Streams Kubernetes pod logs via the Watch API.
+* **Resilience Probe:** Apdex-based health monitor probing target URLs through a **server-side proxy** (`POST /console/api/probe`) to bypass CORS. Features multi-target round-robin, EMA-smoothed scoring, adjustable thresholds, and clickable diagnostic popovers.
+
+**Key Capabilities:**
+* **Sortable & Persistent:** Drag-and-drop reordering saved to `localStorage`.
+* **Expand/Collapse:** Each panel expands to show detailed diagnostics and tuning controls.
+* **Engine Status Bar:** Live sensor fabric, active policy count, and emergency `HALT EXPERIMENTS`.
+* **Dark/Light Theme:** Toggle persisted across sessions.
+
+**Additional Views:**
+
+* **Builder**: Visual policy configurator with type-specific sabotage fields (gRPC stream modes, RAM chunks, CPU throttles). Generates YAML payloads validated by a blast radius guard.
+* **Oracle**: AI SRE Copilot: paste infrastructure context and let LLMs autonomously generate optimal chaos configurations.
+* **Docs**: Interactive documentation with full-text search, navigation tree, and API reference.
+
+> **Full architecture, API reference & diagnostic field docs:** [docs/web_console.md](docs/web_console.md)
+
+---
 
 ## Documentation
 
