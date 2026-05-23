@@ -148,6 +148,9 @@ graph LR
     class CTL,OP,WC control;
 ```
 ---
+The Web Console and Resilience Probe architecture is documented in detail at **[docs/web_console.md](web_console.md)** — including Mermaid diagrams for the probe proxy flow, API endpoint reference, and diagnostic field documentation.
+
+---
 
 ## 1. Core Policy Logic & Security Guards
 
