@@ -25,4 +25,4 @@ resources:
 - chaospolicy_admin_role.yaml
 - chaospolicy_editor_role.yaml
 - chaospolicy_viewer_role.yaml
-
+- pastaay_log_reader.yaml
