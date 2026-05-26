@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
@@ -28,10 +29,12 @@ func WatchRedisPubSub(ctx context.Context, client *redis.Client, channel string,
 			}
 
 			pubsub := client.Subscribe(ctx, channel)
-			_, err := pubsub.Receive(ctx)
-			if err != nil {
+			if _, err := pubsub.Receive(ctx); err != nil {
 				mgr.SetSensorStatus("redis", "error")
-				pubsub.Close()
+				log.Printf("[Pastaay-Redis] subscribe failed on %q: %v", channel, err)
+				if cerr := pubsub.Close(); cerr != nil {
+					log.Printf("[Pastaay-Redis] pubsub close after subscribe failure: %v", cerr)
+				}
 
 				select {
 				case <-ctx.Done():
@@ -49,18 +52,20 @@ func WatchRedisPubSub(ctx context.Context, client *redis.Client, channel string,
 			for {
 				select {
 				case <-ctx.Done():
-					break Loop // Graceful exit
+					break Loop
 				case msg, ok := <-ch:
 					if !ok {
 						break Loop
 					}
 					var newCfg PastaayConfig
 					if err := yaml.Unmarshal([]byte(msg.Payload), &newCfg); err != nil {
+						log.Printf("[Pastaay-Redis] YAML parse failed: %v", err)
 						sendAck(ctx, client, ackChannel, wg, "error", "YAML parse failed")
 						continue
 					}
 
 					if err := newCfg.Validate(); err != nil {
+						log.Printf("[Pastaay-Redis] payload rejected: %v", err)
 						mgr.SetSensorStatus("redis", "rejected_payload")
 						sendAck(ctx, client, ackChannel, wg, "rejected", err.Error())
 						continue
@@ -72,7 +77,9 @@ func WatchRedisPubSub(ctx context.Context, client *redis.Client, channel string,
 				}
 			}
 
-			pubsub.Close()
+			if cerr := pubsub.Close(); cerr != nil {
+				log.Printf("[Pastaay-Redis] pubsub close on loop exit: %v", cerr)
+			}
 			mgr.SetSensorStatus("redis", "disconnected")
 
 			select {
@@ -94,11 +101,17 @@ func sendAck(ctx context.Context, client *redis.Client, channel string, wg *sync
 		if wg != nil {
 			defer wg.Done()
 		}
+		// Detach cancellation but keep deadline
 		ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		ack := RedisAck{Status: status, Message: message}
-		if payload, err := json.Marshal(ack); err == nil {
-			client.Publish(ackCtx, channel, payload)
+		payload, err := json.Marshal(ack)
+		if err != nil {
+			log.Printf("[Pastaay-Redis] ack marshal failed: %v", err)
+			return
+		}
+		if err := client.Publish(ackCtx, channel, payload).Err(); err != nil {
+			log.Printf("[Pastaay-Redis] ack publish to %q failed: %v", channel, err)
 		}
 	}()
 }

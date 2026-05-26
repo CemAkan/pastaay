@@ -1,0 +1,69 @@
+{{ define "docs_content" }}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/dracula.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+<div class="flex h-full gap-6">
+    <div class="w-64 flex-shrink-0 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded-lg p-4 h-fit shadow-sm">
+        <h3 class="text-xs font-bold text-[var(--text-header)] mb-4 border-b border-[var(--border-color)] pb-2 font-mono uppercase tracking-widest">Documents</h3>
+        <ul class="space-y-2 text-xs font-mono list-none" id="doc-list">
+            <li><a href="#" onclick="loadDoc('index.md')" data-doc="index.md" class="text-[var(--text-primary)]">🏠 Home</a></li>
+            <li><a href="#" onclick="loadDoc('architecture.md')" data-doc="architecture.md" class="text-[var(--text-primary)]">Architecture</a></li>
+            <li><a href="#" onclick="loadDoc('configuration.md')" data-doc="configuration.md" class="text-[var(--text-primary)]">Configuration</a></li>
+            <li><a href="#" onclick="loadDoc('operator.md')" data-doc="operator.md" class="text-[var(--text-primary)]">Operator</a></li>
+            <li><a href="#" onclick="loadDoc('pastaayctl.md')" data-doc="pastaayctl.md" class="text-[var(--text-primary)]">Pastaayctl</a></li>
+            <li><a href="#" onclick="loadDoc('remote_control.md')" data-doc="remote_control.md" class="text-[var(--text-primary)]">Remote Control</a></li>
+            <li><a href="#" onclick="loadDoc('web_console.md')" data-doc="web_console.md" class="text-[var(--text-primary)]">Web Console</a></li>
+        </ul>
+    </div>
+
+    <div class="flex-1 bg-[var(--bg-sidebar)] border border-[var(--border-color)] rounded-lg p-8 overflow-y-auto h-full shadow-inner">
+        <article id="md-viewer" class="md-content">
+            <p class="text-[var(--text-primary)] animate-pulse font-mono">Select a document...</p>
+        </article>
+    </div>
+</div>
+
+<script>
+    function toggleZoom(el) { el.classList.toggle('mermaid-fullscreen'); }
+
+    async function loadDoc(filename) {
+        const viewer = document.getElementById('md-viewer');
+        viewer.innerHTML = '<p class="text-sky-400 animate-pulse font-mono text-sm">Reading ' + filename + '...</p>';
+
+        try {
+            const resp = await fetch('/console/docs/raw/' + filename);
+            if (!resp.ok) throw new Error("Document not found");
+            let text = await resp.text();
+
+            // Mermaid
+            const blocks = [];
+            text = text.replace(/```mermaid\s*([\s\S]*?)\s*```/g, (match, code) => {
+                const id = `MERMAID_${blocks.length}`;
+                blocks.push(`<div class="mermaid-wrapper" onclick="toggleZoom(this)"><div class="mermaid">${code}</div></div>`);
+                return id;
+            });
+
+            text = text.replace(/\(assets\//g, '(/console/docs/raw/assets/');
+            text = text.replace(/src=["']assets\//g, 'src="/console/docs/raw/assets/');
+
+            let html = marked.parse(text);
+            blocks.forEach((b, i) => html = html.replace(`MERMAID_${i}`, b));
+
+            viewer.innerHTML = html;
+
+            // Mermaid & Highlight JS
+            const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark';
+            mermaid.initialize({ startOnLoad: false, theme: theme });
+            mermaid.run({ querySelector: '.mermaid' }).catch(console.error);
+            viewer.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+        } catch (err) {
+            viewer.innerHTML = `<p class="text-rose-400 font-mono">Error: ${err.message}</p>`;
+        }
+    }
+
+    //render first doc on load
+    window.onload = () => loadDoc('index.md');
+</script>
+{{ end }}

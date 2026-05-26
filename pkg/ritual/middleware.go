@@ -9,6 +9,7 @@ import (
 
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/telemetry"
 	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
@@ -20,43 +21,51 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 				return
 			}
 			policies := mgr.GetActivePolicies("http")
-			for _, p := range policies {
-				if matchPath(r.URL.Path, &p) && matchHeaders(r, p.MatchHeaders) {
+			for i := range policies {
+				p := &policies[i]
+				if !matchPath(r.URL.Path, p) || !matchHeaders(r, p.MatchHeaders) {
+					continue
+				}
 
-					metricTag := p.MetricTag
+				metricTag := p.MetricTag
 
-					if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
-						metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
-						ctx, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.latency", p.Target, "latency")
+				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
+					metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
+					ctx, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.latency", p.Target, "latency")
 
-						timer := time.NewTimer(p.LatencyDuration)
-						select {
-						case <-timer.C:
-							timer.Stop()
-							span.End()
-						case <-ctx.Done():
-							timer.Stop()
-							span.End()
-							w.WriteHeader(499)
-							return
-						}
-					}
-					if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
-						metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
-						_, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.error", p.Target, "error")
+					telemetry.EmitInfo("http", "HTTP Latency Injected", map[string]interface{}{"duration": p.LatencyDuration.String(), "target": p.Target}, span)
 
-						status := p.ErrorCode
-						if status == 0 {
-							status = http.StatusInternalServerError
-						}
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(status)
-						
-						io.WriteString(w, p.ErrorBody)
-
+					timer := time.NewTimer(p.LatencyDuration)
+					select {
+					case <-timer.C:
 						span.End()
+					case <-ctx.Done():
+						timer.Stop()
+						span.End()
+						w.WriteHeader(499)
 						return
 					}
+				}
+
+				if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+					metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
+					_, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.error", p.Target, "error")
+					defer span.End()
+
+					status := p.ErrorCode
+					if status == 0 {
+						status = http.StatusInternalServerError
+					}
+
+					telemetry.EmitError("http", p.Target, "HTTP Fault Injected", p.ErrorBody, span)
+
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(status)
+
+					if p.ErrorBody != "" {
+						_, _ = io.WriteString(w, p.ErrorBody)
+					}
+					return
 				}
 			}
 			next.ServeHTTP(w, r)

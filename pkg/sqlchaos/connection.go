@@ -10,6 +10,7 @@ import (
 
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/telemetry"
 	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
@@ -35,18 +36,16 @@ func (t *WrapperTx) Commit() error   { return t.originalTx.Commit() }
 func (t *WrapperTx) Rollback() error { return t.originalTx.Rollback() }
 
 func applySQLChaos(ctx context.Context, mgr *config.Manager, cleanQuery string) (context.Context, error) {
-
 	if ctx.Value(chaosKey{}) != nil || mgr.IsCleanCommandIgnored("sql", cleanQuery) {
 		return ctx, nil
 	}
 
 	policies := mgr.GetActivePolicies("sql")
 	currentCtx := ctx
-	shieldApplied := false // GOD-LEVEL YAMA: Kalkan durumunu takip et
+	shieldApplied := false
 
 	for _, p := range policies {
 		if isTargetMatch(cleanQuery, &p) {
-			// YAMA: Eşleşme anında kalkanı doğrudan currentCtx'e zımbala! (Amnezi engellendi)
 			if !shieldApplied {
 				currentCtx = context.WithValue(currentCtx, chaosKey{}, true)
 				shieldApplied = true
@@ -57,6 +56,8 @@ func applySQLChaos(ctx context.Context, mgr *config.Manager, cleanQuery string) 
 			if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
 				spanCtx, span := tracing.StartChaosSpan(currentCtx, "pastaay.sql.latency", p.Target, "latency")
+
+				telemetry.EmitInfo("sql", "SQL Latency Injected", map[string]interface{}{"duration": p.LatencyDuration.String(), "target": p.Target}, span)
 
 				timer := time.NewTimer(p.LatencyDuration)
 				select {
@@ -69,14 +70,19 @@ func applySQLChaos(ctx context.Context, mgr *config.Manager, cleanQuery string) 
 					return currentCtx, spanCtx.Err()
 				}
 			}
+
 			if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
 				_, span := tracing.StartChaosSpan(currentCtx, "pastaay.sql.error", p.Target, "error")
-				span.End()
+
 				msg := p.ErrorBody
 				if msg == "" {
 					msg = "sql: database connection is closed"
 				}
+
+				telemetry.EmitError("sql", p.Target, "SQL Fault Injected", msg, span)
+
+				span.End()
 				return currentCtx, errors.New(msg)
 			}
 		}

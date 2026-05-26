@@ -10,6 +10,8 @@ import (
 
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/telemetry"
+	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
 type WrapperDriver struct {
@@ -26,7 +28,7 @@ type fallbackConnector struct {
 }
 
 func (c *WrapperConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	if err := applyConnectionChaos(c.cfgManager); err != nil {
+	if err := applyConnectionChaos(ctx, c.cfgManager); err != nil {
 		return nil, err
 	}
 	conn, err := c.original.Connect(ctx)
@@ -54,7 +56,7 @@ func (d *WrapperDriver) OpenConnector(name string) (driver.Connector, error) {
 }
 
 func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
-	if err := applyConnectionChaos(d.cfgManager); err != nil {
+	if err := applyConnectionChaos(context.Background(), d.cfgManager); err != nil {
 		return nil, err
 	}
 	conn, err := d.original.Open(name)
@@ -64,7 +66,7 @@ func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
 	return &WrapperConn{originalConn: conn, cfgManager: d.cfgManager}, nil
 }
 
-func applyConnectionChaos(mgr *config.Manager) error {
+func applyConnectionChaos(ctx context.Context, mgr *config.Manager) error {
 	policies := mgr.GetActivePolicies("sql")
 	for _, p := range policies {
 		if p.DropConnection && (strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, "database")) {
@@ -74,6 +76,9 @@ func applyConnectionChaos(mgr *config.Manager) error {
 			}
 			if rand.Float64() < chance {
 				metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
+				_, span := tracing.StartChaosSpan(ctx, "pastaay.sql.drop", p.Target, "drop")
+				telemetry.EmitError("sql", p.Target, "Connection force dropped", "TCP stream severed by DropConnection policy", span)
+				span.End()
 				return errors.New("[Pastaay-SQL] Chaos: TCP connection forcefully dropped")
 			}
 		}

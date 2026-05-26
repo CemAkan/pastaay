@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/telemetry"
 	"github.com/CemAkan/pastaay/pkg/tracing"
 	"github.com/IBM/sarama"
 )
@@ -44,12 +45,14 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 			return "", false
 		},
 	}
-	
+
 	shouldDrop, delay, evalErr, latencyTag, errorTag := m.evaluator.Evaluate(ctx, msgCtx)
 
 	if delay > 0 && latencyTag != "" {
 		metrics.InjectedFaultsTotal.WithLabelValues(latencyTag, "latency").Inc()
 		spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.latency", latencyTag, "latency")
+
+		telemetry.EmitInfo("kafka", "Kafka Latency Injected", map[string]interface{}{"duration": delay.String(), "target": msg.Topic}, span)
 
 		timer := time.NewTimer(delay)
 		select {
@@ -66,12 +69,16 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 	if shouldDrop && errorTag != "" {
 		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "drop").Inc()
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.drop", errorTag, "drop")
+		telemetry.EmitError("kafka", msg.Topic, "Message dropped securely", "Silent drop", span)
 		span.End()
 		return true, nil
 	}
 	if evalErr != nil && errorTag != "" {
 		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "error").Inc()
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.kafka.error", errorTag, "error")
+
+		telemetry.EmitError("kafka", errorTag, "Kafka Fault Injected", evalErr.Error(), span)
+
 		span.End()
 		return true, evalErr
 	}

@@ -1,0 +1,26 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pastaay-log-reader
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pastaay-log-binding
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: controller-manager
+    namespace: system
+roleRef:
+  kind: Role
+  name: pastaay-log-reader
+  apiGroup: rbac.authorization.k8s.io

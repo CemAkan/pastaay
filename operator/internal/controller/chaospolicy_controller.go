@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"time"
 
 	chaosv1 "github.com/CemAkan/pastaay/operator/api/v1"
@@ -33,6 +34,22 @@ import (
 )
 
 const chaosPolicyFinalizer = "chaos.pastaay.io/finalizer"
+
+// Shared HTTP client with bounded timeout to prevent reconcile-queue starvation.
+var sharedEngineClient = &http.Client{Timeout: 10 * time.Second}
+
+// postToEngine sends a JSON payload to the engine webhook with proper context cancellation and optional bearer-token authentication.
+func postToEngine(ctx context.Context, url string, payload []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tok := os.Getenv("PASTAAY_WEBHOOK_TOKEN"); tok != "" {
+		req.Header.Set("X-Pastaay-Token", tok)
+	}
+	return sharedEngineClient.Do(req)
+}
 
 type ChaosPolicyReconciler struct {
 	client.Client
@@ -60,13 +77,16 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				"version":  1,
 				"policies": []interface{}{},
 			}
-			payloadBytes, _ := json.Marshal(rollbackPayload)
-			resp, err := http.Post(r.EngineURL, "application/json", bytes.NewBuffer(payloadBytes))
+			payloadBytes, err := json.Marshal(rollbackPayload)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			resp, err := postToEngine(ctx, r.EngineURL, payloadBytes)
 			if err != nil {
 				l.Error(err, "Failed to send deletion cleanup to Engine, retrying...", "url", r.EngineURL)
 				return ctrl.Result{}, err
 			}
-			resp.Body.Close()
+			defer resp.Body.Close()
 
 			controllerutil.RemoveFinalizer(&policy, chaosPolicyFinalizer)
 			if err := r.Update(ctx, &policy); err != nil {
@@ -112,8 +132,11 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				"policies": []interface{}{},
 			}
 
-			payloadBytes, _ := json.Marshal(rollbackPayload)
-			resp, err := http.Post(r.EngineURL, "application/json", bytes.NewBuffer(payloadBytes))
+			payloadBytes, err := json.Marshal(rollbackPayload)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			resp, err := postToEngine(ctx, r.EngineURL, payloadBytes)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -140,7 +163,7 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	resp, err := http.Post(r.EngineURL, "application/json", bytes.NewBuffer(payload))
+	resp, err := postToEngine(ctx, r.EngineURL, payload)
 	if err != nil {
 		l.Error(err, "Failed to connect to Pastaay Engine", "url", r.EngineURL)
 		return ctrl.Result{}, err

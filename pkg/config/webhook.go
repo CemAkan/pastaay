@@ -28,7 +28,9 @@ func WebhookHandler(expectedToken string, reloadCallback func(*PastaayConfig)) h
 			return
 		}
 
-		// Timing-attack resistant token validation
+		defer r.Body.Close()
+
+		// Timing-attack resistant token validation.
 		reqToken := r.Header.Get("X-Pastaay-Token")
 		if expectedToken != "" && subtle.ConstantTimeCompare([]byte(reqToken), []byte(expectedToken)) != 1 {
 			log.Printf("[Pastaay-Webhook] Blocked unauthorized request from %s", r.RemoteAddr)
@@ -36,10 +38,6 @@ func WebhookHandler(expectedToken string, reloadCallback func(*PastaayConfig)) h
 			return
 		}
 
-		// Body closure is critical for preventing socket leaks
-		defer r.Body.Close()
-
-		// Memory Guard: Explicitly limiting the reader before any allocation
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookPayloadBytes))
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, "Payload read error or too large", "")
@@ -53,22 +51,25 @@ func WebhookHandler(expectedToken string, reloadCallback func(*PastaayConfig)) h
 		}
 
 		if err := newCfg.Validate(); err != nil {
-			log.Printf("[Pastaay-Webhook] Rejected invalid config from %s", r.RemoteAddr)
+			log.Printf("[Pastaay-Webhook] Rejected invalid config from %s: %v", r.RemoteAddr, err)
 			writeJSONError(w, http.StatusUnprocessableEntity, "Policy validation failed", err.Error())
 			return
 		}
 
 		reloadCallback(&newCfg)
-		log.Printf("[Pastaay-Webhook] Engine memory updated successfully")
+		log.Printf("[Pastaay-Webhook] Engine memory updated successfully from %s", r.RemoteAddr)
 
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(WebhookResponse{Status: "success", Message: "Applied"})
+		if err := json.NewEncoder(w).Encode(WebhookResponse{Status: "success", Message: "Applied"}); err != nil {
+			log.Printf("[Pastaay-Webhook] success response encode failed: %v", err)
+		}
 	}
 }
 
 func writeJSONError(w http.ResponseWriter, code int, msg, details string) {
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(WebhookResponse{Status: "error", Message: msg, Details: details})
+	if err := json.NewEncoder(w).Encode(WebhookResponse{Status: "error", Message: msg, Details: details}); err != nil {
+		log.Printf("[Pastaay-Webhook] error response encode failed (code=%d): %v", code, err)
+	}
 }
 
 func ExportHandler(mgr *Manager) http.HandlerFunc {
@@ -82,10 +83,16 @@ func ExportHandler(mgr *Manager) http.HandlerFunc {
 		cfg := mgr.GetRawConfig()
 
 		if cfg == nil {
-			w.Write([]byte("version: 1\npolicies: []\n"))
+			if _, err := w.Write([]byte("version: 1\npolicies: []\n")); err != nil {
+				log.Printf("[Pastaay-Webhook] export empty-cfg write failed: %v", err)
+			}
 			return
 		}
 
-		yaml.NewEncoder(w).Encode(cfg)
+		enc := yaml.NewEncoder(w)
+		defer enc.Close()
+		if err := enc.Encode(cfg); err != nil {
+			log.Printf("[Pastaay-Webhook] export YAML encode failed: %v", err)
+		}
 	}
 }

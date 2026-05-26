@@ -1,13 +1,14 @@
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 WORKDIR /app
 
-# Dependency Cache Layer 
-COPY go.mod go.sum* ./
-RUN go mod download
+COPY go.mod go.sum ./
+COPY vendor/ ./vendor/
+COPY docs/ ./docs/
+COPY pkg/ ./pkg/
+COPY web/ ./web/
+COPY examples/demo/ ./examples/demo/
 
-# Build Layer
-COPY . .
-RUN go build -v -o /app/main ./examples/demo/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -v -ldflags="-s -w" -o /app/main ./examples/demo/main.go
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -16,6 +17,5 @@ WORKDIR /root/
 COPY --from=builder /app/main .
 COPY --from=builder /app/examples/demo/pastaay.yaml .
 
-# 4317 OTLP, 2112 Metrics, 8080 API
-EXPOSE 8080 2112 50051 4317
+EXPOSE 8080 2112
 CMD ["./main"]

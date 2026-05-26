@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/CemAkan/pastaay/pkg/config"
 	"github.com/CemAkan/pastaay/pkg/grpcchaos"
 	"google.golang.org/grpc"
@@ -53,10 +55,14 @@ type ProbeState struct {
 }
 
 func main() {
+	_ = godotenv.Load()
+	cfg, err := config.LoadConfig("pastaay.yaml")
+	if err != nil {
+		log.Fatalf("[FATAL] config load: %v", err)
+	}
 	log.SetOutput(io.Discard)
 	fmt.Print(C_Startup)
 
-	cfg, _ := config.LoadConfig("pastaay.yaml")
 	mgr := config.NewManager(cfg)
 	config.WatchConfig("pastaay.yaml", mgr.Update)
 

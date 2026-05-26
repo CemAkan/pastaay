@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CemAkan/pastaay/pkg/telemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -113,6 +114,9 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 			if decision.Err != nil {
 				metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
 				_, span := tracing.StartChaosSpan(ctx, "pastaay.grpc.error", s.method, "error")
+
+				telemetry.EmitError("grpc", s.method, "gRPC Fault Injected", decision.Err.Error(), span)
+
 				span.End()
 				return decision.Err
 			}

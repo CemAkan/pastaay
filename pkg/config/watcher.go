@@ -15,10 +15,11 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 		return err
 	}
 
-	var timer *time.Timer
-	var timerMu sync.Mutex
-	var reattachMu sync.Mutex
-	var isReattaching atomic.Bool
+	var (
+		timer         *time.Timer
+		timerMu       sync.Mutex
+		isReattaching atomic.Bool
+	)
 
 	go func() {
 		defer watcher.Close()
@@ -30,11 +31,10 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 				}
 
 				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Chmod) {
-					reattachMu.Lock()
 					if isReattaching.CompareAndSwap(false, true) {
-						go func() {
+						go func(op fsnotify.Op) {
 							defer isReattaching.Store(false)
-							log.Printf("Pastaay: Config inode changed [%s]. Attempting re-attach...", event.Op)
+							log.Printf("Pastaay: Config inode changed [%s]. Attempting re-attach...", op)
 							for i := 0; i < 10; i++ {
 								time.Sleep(500 * time.Millisecond)
 								if err := watcher.Add(filePath); err == nil {
@@ -46,10 +46,10 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 								}
 							}
 							log.Printf("Pastaay: Failed to re-attach watcher to %s after 10 attempts.", filePath)
-						}()
+						}(event.Op)
 					}
-					reattachMu.Unlock()
 				}
+
 				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
 					timerMu.Lock()
 					if timer != nil {
@@ -65,11 +65,12 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) error {
 					})
 					timerMu.Unlock()
 				}
+
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
 				}
-				log.Printf("Pastaay: Watcher runtime error: %v\n", err)
+				log.Printf("Pastaay: Watcher runtime error: %v", err)
 			}
 		}
 	}()

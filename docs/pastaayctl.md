@@ -98,10 +98,11 @@ Pastaay includes a native, zero-dependency Multi-LLM client that acts as an auto
 
 | Command | Provider Engine | Key Feature | Purpose |
 | --- | --- | --- | --- |
-| **oracle** | Gemini, OpenAI, Anthropic | Auto-Apply Injection | Analyzes live system stress and generates targeted YAML policies. Includes an interactive prompt to instantly inject the AI-generated payload into the fleet. |
+| **oracle** | DeepSeek, Gemini, OpenAI, Anthropic | Auto-Apply Injection | Analyzes live system stress and generates targeted YAML policies. Includes an interactive prompt to instantly inject the AI-generated payload into the fleet. |
 
 **Supported Providers & Default Models:**
 * `--provider openai` (Defaults to `gpt-4o-mini`)
+* `--provider deepseek` (Defaults to `deepseek-reasoner`)
 * `--provider gemini` (Defaults to `gemini-2.5-flash`)
 * `--provider anthropic` (Defaults to `claude-3-5-sonnet-latest`)
 
@@ -170,5 +171,5 @@ policies:
 <br>
 
 <p align="center">
-  <img src="assets/common_bottom.gif" alt="Pastaay Bottom Banner">
+  <img src="assets/common_footer.gif" alt="Pastaay Bottom Banner">
 </p>

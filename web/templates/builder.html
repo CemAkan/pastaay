@@ -1,0 +1,65 @@
+{{ define "builder_content" }}
+<div class="flex h-full gap-6 text-slate-300">
+    <div class="w-1/2 flex flex-col h-full bg-[#1f2226] border border-[#30363d] rounded-xl p-6 overflow-y-auto shadow-md">
+        <div class="flex justify-between items-center mb-6 pb-4 border-b border-[#30363d] bg-[#1f2226] z-10">
+            <div>
+                <h2 class="text-lg font-bold text-slate-100 font-mono tracking-tight">Declarative Designer</h2>
+                <p class="text-[11px] text-slate-500 font-mono mt-1 uppercase tracking-widest">Target Profile Configurations</p>
+            </div>
+            <button onclick="window.BuilderEngine.addPolicy()" class="bg-[#2c2f36] border border-[#30363d] text-slate-200 hover:text-white px-4 py-2 rounded text-xs font-mono font-bold transition-colors shadow-sm">+ Add Unit</button>
+        </div>
+
+        <div class="bg-[#161719] border border-[#30363d] p-5 rounded-lg mb-6 border-l-4 border-l-[#56a4ff] shadow-inner">
+            <h3 class="text-[10px] font-mono text-slate-400 mb-4 uppercase tracking-widest font-bold">Global Safety Constraints</h3>
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-[10px] text-slate-500 mb-2 font-mono uppercase font-bold">Warmup Delay</label>
+                    <input id="warmup-duration" type="text" value="5s" oninput="window.BuilderEngine.updateGlobal('warmup_duration', this.value)" class="w-full bg-[#1f2226] border border-[#30363d] rounded px-3 py-2 text-sm font-mono text-slate-200 outline-none focus:border-[#56a4ff] transition-colors shadow-sm">
+                    <p class="text-[10px] text-slate-500 mt-1 font-mono">Delay before policy activation (e.g., 5s, 500ms).</p>
+                </div>
+                <div class="flex items-center mt-6">
+                    <label class="flex items-center cursor-pointer select-none">
+                        <input id="enable-default-ignored" type="checkbox" checked onchange="window.BuilderEngine.updateGlobal('enable_default_ignored', this.checked)" class="form-checkbox h-4 w-4 border-[#30363d] rounded bg-[#1f2226] text-[#56a4ff] focus:ring-0">
+                        <span class="ml-3 text-[11px] text-slate-300 font-mono uppercase font-bold tracking-wide">Core Safety Shield</span>
+                    </label>
+                    <span class="text-[10px] text-slate-500 font-mono ml-3">Protects critical operations by default.</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="policies-container" class="space-y-5"></div>
+        <datalist id="discovered-targets"></datalist>
+    </div>
+
+    <div class="w-1/2 flex flex-col h-full bg-[#1f2226] border border-[#30363d] rounded-xl p-0 overflow-hidden shadow-md">
+        <div class="bg-[#161719] p-4 border-b border-[#30363d] flex justify-between items-center">
+            <h3 class="font-mono text-slate-400 text-xs uppercase tracking-widest font-bold">Deploy Strategy Payload</h3>
+            <div class="flex gap-3">
+                <input type="password" id="webhook-token" placeholder="Security Token..." class="bg-[#1f2226] border border-[#30363d] rounded px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-[#56a4ff] font-mono transition-colors shadow-inner">
+                <button onclick="window.BuilderEngine.deployToEngine(this)" class="bg-[#2c2f36] hover:bg-[#30363d] border border-[#30363d] text-white px-5 py-1.5 rounded text-[11px] font-mono font-bold uppercase tracking-widest transition-colors shadow-sm">
+                    Deploy
+                </button>
+                <button onclick="window.BuilderEngine.rollback(this)" class="bg-amber-950/40 border border-amber-900/50 hover:bg-amber-900 text-amber-400 hover:text-white px-4 py-1.5 rounded text-[11px] font-mono font-bold transition-colors shadow-sm" title="Revert to Previous YAML">
+                    ROLLBACK
+                </button>
+            </div>
+        </div>
+
+        <div class="flex-1 p-5 overflow-y-auto bg-[#0d1117] shadow-inner">
+            <pre class="m-0 whitespace-pre-wrap"><code id="yaml-preview" class="language-yaml hljs text-sm font-mono !bg-transparent leading-relaxed"></code></pre>
+        </div>
+
+        <div class="bg-[#161719] p-5 border-t border-[#30363d] flex flex-col gap-3 h-56 flex-none">
+            <div class="flex justify-between items-center border-b border-[#30363d] pb-2.5">
+                <span class="text-xs font-mono text-slate-400 uppercase tracking-widest font-bold">Blast Radius Validation Guard</span>
+                <span id="risk-badge" class="px-3 py-1 rounded text-[10px] font-mono font-bold tracking-widest bg-[#2c2f36] text-emerald-400 border border-[#30363d]">AWAITING DATA</span>
+            </div>
+            <div id="lint-issues" class="text-xs font-mono text-slate-400 overflow-y-auto flex-1 pr-2">
+                <div class="text-slate-500">System baseline loaded. Awaiting policy generation...</div>
+            </div>
+        </div>
+    </div>
+</div>
+<script type="module" src="/static/js/builder.js"></script>
+
+{{ end }}

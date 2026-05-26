@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/metrics"
+	"github.com/CemAkan/pastaay/pkg/telemetry"
 	"github.com/CemAkan/pastaay/pkg/tracing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -36,12 +37,14 @@ func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Deliv
 			return "", false
 		},
 	}
-	
+
 	shouldDrop, delay, evalErr, latencyTag, errorTag := m.evaluator.Evaluate(ctx, msgCtx)
 
 	if delay > 0 && latencyTag != "" {
 		metrics.InjectedFaultsTotal.WithLabelValues(latencyTag, "latency").Inc()
 		spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.latency", latencyTag, "latency")
+
+		telemetry.EmitInfo("rabbitmq", "RabbitMQ Latency Injected", map[string]interface{}{"duration": delay.String(), "target": delivery.RoutingKey}, span)
 
 		timer := time.NewTimer(delay)
 		select {
@@ -58,12 +61,16 @@ func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Deliv
 	if shouldDrop && errorTag != "" {
 		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "drop").Inc()
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.drop", errorTag, "drop")
+		telemetry.EmitError("rabbitmq", delivery.RoutingKey, "Message dropped securely", "Silent drop", span)
 		span.End()
 		return true, nil
 	}
 	if evalErr != nil && errorTag != "" {
 		metrics.InjectedFaultsTotal.WithLabelValues(errorTag, "error").Inc()
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.rabbitmq.error", errorTag, "error")
+
+		telemetry.EmitError("rabbitmq", errorTag, "RabbitMQ Fault Injected", evalErr.Error(), span)
+
 		span.End()
 		return true, evalErr
 	}
