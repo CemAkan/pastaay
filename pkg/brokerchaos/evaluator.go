@@ -67,7 +67,8 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 			}
 		}
 
-		if p.LatencyDuration > delayDuration && rand.Float64() < p.LatencyChance {
+		// Latency: take the longest among policies that win the roll.
+		if p.LatencyChance > 0 && p.LatencyDuration > delayDuration && rand.Float64() < p.LatencyChance {
 			delayDuration = p.LatencyDuration
 			latencyTag = p.MetricTag
 		}

@@ -68,6 +68,9 @@ func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
 }
 
 func applyConnectionChaos(ctx context.Context, mgr *config.Manager) error {
+	if mgr == nil {
+		return nil
+	}
 	policies := mgr.GetActivePolicies("sql")
 	for _, p := range policies {
 		if !p.DropConnection {
@@ -86,9 +89,8 @@ func applyConnectionChaos(ctx context.Context, mgr *config.Manager) error {
 
 		metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.sql.drop", p.Target, "drop")
-		// Always end the span on every return path.
-		defer span.End()
 		telemetry.EmitError("sql", p.Target, "Connection force dropped", "TCP stream severed by DropConnection policy", span)
+		span.End()
 		return errors.New("[Pastaay-SQL] Chaos: TCP connection forcefully dropped")
 	}
 	return nil

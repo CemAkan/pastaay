@@ -2,6 +2,7 @@ package tracing
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"go.opentelemetry.io/otel"
@@ -26,10 +27,13 @@ func InitProvider(ctx context.Context, endpoint string) (func(context.Context) e
 	endpoint = strings.TrimPrefix(endpoint, "https://")
 	endpoint = strings.TrimSuffix(endpoint, "/")
 
-	exp, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(),
-	)
+	opts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint)}
+
+	if os.Getenv("OTEL_EXPORTER_OTLP_INSECURE") == "1" {
+		opts = append(opts, otlptracegrpc.WithInsecure())
+	}
+
+	exp, err := otlptracegrpc.New(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
