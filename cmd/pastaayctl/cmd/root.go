@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -111,7 +112,7 @@ func setupEnvironment() {
 	cf, err := loadConfigFile(configPath)
 
 	if err != nil {
-		fmt.Println("ERROR: Conf file can not load")
+		fmt.Fprintf(os.Stderr, "ERROR: cannot load profile registry (%s): %v\n", configPath, err); os.Exit(1)
 	}
 
 	active := cf.CurrentContext
