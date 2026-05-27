@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -33,22 +35,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-const chaosPolicyFinalizer = "chaos.pastaay.io/finalizer"
+const (
+	chaosPolicyFinalizer = "chaos.pastaay.io/finalizer"
+	// maxBodyBytes bounds the engine response we read on POST so a
+	// hostile/buggy engine cannot drive operator OOM.
+	maxBodyBytes = 64 << 10
+)
 
 // Shared HTTP client with bounded timeout to prevent reconcile-queue starvation.
 var sharedEngineClient = &http.Client{Timeout: 10 * time.Second}
 
-// postToEngine sends a JSON payload to the engine webhook with proper context cancellation and optional bearer-token authentication.
-func postToEngine(ctx context.Context, url string, payload []byte) (*http.Response, error) {
+// postToEngine sends a JSON payload to the engine webhook with proper context
+// cancellation and optional bearer-token authentication. Returns status, body
+// snippet, and error.
+func postToEngine(ctx context.Context, url string, payload []byte) (int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return 0, "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if tok := os.Getenv("PASTAAY_WEBHOOK_TOKEN"); tok != "" {
 		req.Header.Set("X-Pastaay-Token", tok)
 	}
-	return sharedEngineClient.Do(req)
+	resp, err := sharedEngineClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	return resp.StatusCode, string(body), nil
 }
 
 type ChaosPolicyReconciler struct {
@@ -69,24 +84,15 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// ── Deletion path ────────────────────────────────────────────────
 	if policy.GetDeletionTimestamp() != nil {
 		if controllerutil.ContainsFinalizer(&policy, chaosPolicyFinalizer) {
-			l.Info("ChaosPolicy deletion detected. Cleaning Engine memory...", "policy", policy.Name)
+			l.Info("ChaosPolicy deletion detected. Re‑snapshotting remaining policies.", "policy", policy.Name)
 
-			rollbackPayload := map[string]interface{}{
-				"version":  1,
-				"policies": []interface{}{},
+			if err := r.resyncEngineWithRemaining(ctx, policy.Name); err != nil {
+				l.Error(err, "Failed to resync Engine on deletion, retrying...", "url", r.EngineURL)
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 			}
-			payloadBytes, err := json.Marshal(rollbackPayload)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			resp, err := postToEngine(ctx, r.EngineURL, payloadBytes)
-			if err != nil {
-				l.Error(err, "Failed to send deletion cleanup to Engine, retrying...", "url", r.EngineURL)
-				return ctrl.Result{}, err
-			}
-			defer resp.Body.Close()
 
 			controllerutil.RemoveFinalizer(&policy, chaosPolicyFinalizer)
 			if err := r.Update(ctx, &policy); err != nil {
@@ -120,29 +126,18 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// Autonomous Rollback Logic (If time has passed naturally)
+	// ── Autonomous expiry ────────────────────────────────────────────
+	// Re‑snapshot the engine from remaining CRs instead of a blanket
+	// wipe so that other active policies survive.
 	if experimentDuration > 0 && policy.Status.LastAppliedTime != nil {
 		expirationTime := policy.Status.LastAppliedTime.Time.Add(experimentDuration)
 
 		if time.Now().After(expirationTime) {
-			l.Info("Chaos duration expired. Initiating autonomous rollback.", "policy", policy.Name)
-
-			rollbackPayload := map[string]interface{}{
-				"version":  1,
-				"policies": []interface{}{},
+			l.Info("Chaos duration expired. Re‑snapshotting engine state.", "policy", policy.Name)
+			if err := r.resyncEngineWithRemaining(ctx, policy.Name); err != nil {
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 			}
 
-			payloadBytes, err := json.Marshal(rollbackPayload)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			resp, err := postToEngine(ctx, r.EngineURL, payloadBytes)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			defer resp.Body.Close()
-
-			// Update Status to Expired
 			policy.Status.Phase = "Expired"
 			if err := r.Status().Update(ctx, &policy); err != nil {
 				return ctrl.Result{}, err
@@ -151,28 +146,30 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// Standard Chaos Injection Pipeline
+	// ── Standard Chaos Injection Pipeline ────────────────────────────
+	// Re‑snapshot the whole set so we never accidentally replace the
+	// engine's state with a single‑policy view.
 	l.Info("Reconciling ChaosPolicy", "name", policy.Name, "type", policy.Spec.Type)
-	wrappedPayload := map[string]interface{}{
-		"version":  1,
-		"policies": []interface{}{policy.Spec},
+	desired, err := r.collectActivePolicies(ctx)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
-
-	payload, err := json.Marshal(wrappedPayload)
+	payload, err := json.Marshal(map[string]interface{}{
+		"version":  1,
+		"policies": desired,
+	})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	resp, err := postToEngine(ctx, r.EngineURL, payload)
+	status, body, err := postToEngine(ctx, r.EngineURL, payload)
 	if err != nil {
 		l.Error(err, "Failed to connect to Pastaay Engine", "url", r.EngineURL)
-		return ctrl.Result{}, err
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		l.Info("Engine rejected the policy", "code", resp.StatusCode)
-		return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+	if status != http.StatusOK {
+		l.Info("Engine rejected the policy", "code", status, "body", truncate(body, 256))
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	// Update Status & Schedule Rollback Requeue
@@ -195,6 +192,65 @@ func (r *ChaosPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// ── helpers ────────────────────────────────────────────────────────────
+
+// resyncEngineWithRemaining lists all live ChaosPolicy CRs, excludes the
+// named policy (the one being deleted/expired), and pushes the result as the
+// authoritative engine state.
+func (r *ChaosPolicyReconciler) resyncEngineWithRemaining(ctx context.Context, excludeName string) error {
+	remaining, err := r.collectActivePoliciesExcluding(ctx, excludeName)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"version":  1,
+		"policies": remaining,
+	})
+	if err != nil {
+		return err
+	}
+	status, body, err := postToEngine(ctx, r.EngineURL, payload)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("engine rejected resync: %d %s", status, truncate(body, 256))
+	}
+	return nil
+}
+
+func (r *ChaosPolicyReconciler) collectActivePolicies(ctx context.Context) ([]chaosv1.ChaosPolicySpec, error) {
+	return r.collectActivePoliciesExcluding(ctx, "")
+}
+
+func (r *ChaosPolicyReconciler) collectActivePoliciesExcluding(ctx context.Context, excludeName string) ([]chaosv1.ChaosPolicySpec, error) {
+	var list chaosv1.ChaosPolicyList
+	if err := r.List(ctx, &list); err != nil {
+		return nil, err
+	}
+	out := make([]chaosv1.ChaosPolicySpec, 0, len(list.Items))
+	for _, p := range list.Items {
+		if p.Name == excludeName {
+			continue
+		}
+		if p.GetDeletionTimestamp() != nil {
+			continue
+		}
+		if p.Status.Phase == "Expired" {
+			continue
+		}
+		out = append(out, p.Spec)
+	}
+	return out, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func (r *ChaosPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
