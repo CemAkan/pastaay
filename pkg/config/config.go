@@ -11,6 +11,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	maxConfigVersion    = 1
+	maxLatencyDuration  = 1 * time.Hour
+	maxRAMInterval      = 1 * time.Hour
+	maxThrottleCeiling  = 10_000_000
+	maxRAMChunkPerEntry = 4096
+)
+
 // Policy defines a single chaos injection rule. Every field supports both snake_case (YAML) and camelCase (JSON/K8s) keys via custom UnmarshalYAML.
 type Policy struct {
 	Name              string            `yaml:"name" json:"name"`
@@ -34,14 +42,12 @@ type Policy struct {
 	WildcardPrefix    string            `yaml:"-" json:"-"`
 }
 
-// configDecodeOrWarn decodes a generic camelCase scalar into target and logs warnings instead of silently dropping bad values.
 func configDecodeOrWarn(node yaml.Node, fieldName string, target interface{}) {
 	if err := node.Decode(target); err != nil {
 		log.Printf("[Pastaay-Config] WARN: field %q decode failed: %v", fieldName, err)
 	}
 }
 
-// configDecodeDuration parses a string node as time.Duration, logging both type errors and parse errors instead of swallowing them.
 func configDecodeDuration(node yaml.Node, fieldName string, target *time.Duration) {
 	if *target != 0 {
 		return
@@ -63,49 +69,55 @@ func configDecodeDuration(node yaml.Node, fieldName string, target *time.Duratio
 func (p *Policy) UnmarshalYAML(value *yaml.Node) error {
 	type shadowPolicy Policy
 	var s shadowPolicy
-	// First, parse standard tags (snake_case)
 	if err := value.Decode(&s); err != nil {
 		return err
 	}
 	*p = Policy(s)
 
-	// Decode into a raw node map to dynamically catch camelCase fallbacks from K8s/JSON streams.
 	var rawMap map[string]yaml.Node
 	if err := value.Decode(&rawMap); err != nil {
-		return nil // Non-map payloads are safely bypassed
+		if value.Kind != yaml.MappingNode {
+			return nil
+		}
+		return fmt.Errorf("policy decode rawmap: %w", err)
 	}
 
-	if node, ok := rawMap["latencyChance"]; ok && p.LatencyChance == 0 {
+	present := func(snake string) bool {
+		_, ok := rawMap[snake]
+		return ok
+	}
+
+	if node, ok := rawMap["latencyChance"]; ok && !present("latency_chance") {
 		configDecodeOrWarn(node, "latencyChance", &p.LatencyChance)
 	}
-	if node, ok := rawMap["latencyDuration"]; ok {
+	if node, ok := rawMap["latencyDuration"]; ok && !present("latency_duration") {
 		configDecodeDuration(node, "latencyDuration", &p.LatencyDuration)
 	}
-	if node, ok := rawMap["errorChance"]; ok && p.ErrorChance == 0 {
+	if node, ok := rawMap["errorChance"]; ok && !present("error_chance") {
 		configDecodeOrWarn(node, "errorChance", &p.ErrorChance)
 	}
-	if node, ok := rawMap["errorCode"]; ok && p.ErrorCode == 0 {
+	if node, ok := rawMap["errorCode"]; ok && !present("error_code") {
 		configDecodeOrWarn(node, "errorCode", &p.ErrorCode)
 	}
-	if node, ok := rawMap["errorBody"]; ok && p.ErrorBody == "" {
+	if node, ok := rawMap["errorBody"]; ok && !present("error_body") {
 		configDecodeOrWarn(node, "errorBody", &p.ErrorBody)
 	}
-	if node, ok := rawMap["matchHeaders"]; ok && len(p.MatchHeaders) == 0 {
+	if node, ok := rawMap["matchHeaders"]; ok && !present("match_headers") {
 		configDecodeOrWarn(node, "matchHeaders", &p.MatchHeaders)
 	}
-	if node, ok := rawMap["dropConnection"]; ok && !p.DropConnection {
+	if node, ok := rawMap["dropConnection"]; ok && !present("drop_connection") {
 		configDecodeOrWarn(node, "dropConnection", &p.DropConnection)
 	}
-	if node, ok := rawMap["streamRollMode"]; ok && p.StreamRollMode == "" {
+	if node, ok := rawMap["streamRollMode"]; ok && !present("stream_roll_mode") {
 		configDecodeOrWarn(node, "streamRollMode", &p.StreamRollMode)
 	}
-	if node, ok := rawMap["throttleThreshold"]; ok && p.ThrottleThreshold == 0 {
+	if node, ok := rawMap["throttleThreshold"]; ok && !present("throttle_threshold") {
 		configDecodeOrWarn(node, "throttleThreshold", &p.ThrottleThreshold)
 	}
-	if node, ok := rawMap["ramChunkMB"]; ok && p.RAMChunkMB == 0 {
+	if node, ok := rawMap["ramChunkMB"]; ok && !present("ram_chunk_mb") {
 		configDecodeOrWarn(node, "ramChunkMB", &p.RAMChunkMB)
 	}
-	if node, ok := rawMap["ramInterval"]; ok {
+	if node, ok := rawMap["ramInterval"]; ok && !present("ram_interval") {
 		configDecodeDuration(node, "ramInterval", &p.RAMInterval)
 	}
 
@@ -134,12 +146,25 @@ var validProtocols = map[string]bool{
 	"mongo": true, "kafka": true, "rabbitmq": true, "resource": true,
 }
 
+var validStreamRollModes = map[string]bool{
+	"":          true, // default
+	"per-call":  true,
+	"per-frame": true,
+	"stream":    true,
+}
+
 // Validate performs strict bounds checking and protocol-specific sanity checks.
 func (c *PastaayConfig) Validate() error {
 	var errs []error
 
-	if c.Version < 1 {
-		errs = append(errs, errors.New("global: version must be at least 1"))
+	if c.Version < 1 || c.Version > maxConfigVersion {
+		errs = append(errs, fmt.Errorf("global: version must be between 1 and %d", maxConfigVersion))
+	}
+	if c.WarmupDuration < 0 {
+		errs = append(errs, errors.New("global: warmup_duration cannot be negative"))
+	}
+	if c.WarmupDuration > 24*time.Hour {
+		errs = append(errs, errors.New("global: warmup_duration unreasonably large (>24h)"))
 	}
 
 	for i, p := range c.Policies {
@@ -161,11 +186,29 @@ func (c *PastaayConfig) Validate() error {
 		if p.LatencyDuration < 0 {
 			errs = append(errs, fmt.Errorf("%s latency_duration cannot be negative", prefix))
 		}
+		if p.LatencyDuration > maxLatencyDuration {
+			errs = append(errs, fmt.Errorf("%s latency_duration exceeds ceiling %s", prefix, maxLatencyDuration))
+		}
+		if p.RAMInterval < 0 {
+			errs = append(errs, fmt.Errorf("%s ram_interval cannot be negative", prefix))
+		}
+		if p.RAMInterval > maxRAMInterval {
+			errs = append(errs, fmt.Errorf("%s ram_interval exceeds ceiling %s", prefix, maxRAMInterval))
+		}
 		if p.RAMChunkMB < 0 {
 			errs = append(errs, fmt.Errorf("%s ram_chunk_mb cannot be negative", prefix))
 		}
+		if p.RAMChunkMB > maxRAMChunkPerEntry {
+			errs = append(errs, fmt.Errorf("%s ram_chunk_mb exceeds ceiling %d", prefix, maxRAMChunkPerEntry))
+		}
 		if p.ThrottleThreshold < 0 {
 			errs = append(errs, fmt.Errorf("%s throttle_threshold cannot be negative", prefix))
+		}
+		if p.ThrottleThreshold > maxThrottleCeiling {
+			errs = append(errs, fmt.Errorf("%s throttle_threshold exceeds ceiling %d", prefix, maxThrottleCeiling))
+		}
+		if !validStreamRollModes[strings.ToLower(p.StreamRollMode)] {
+			errs = append(errs, fmt.Errorf("%s invalid stream_roll_mode %q", prefix, p.StreamRollMode))
 		}
 
 		switch strings.ToLower(p.Type) {

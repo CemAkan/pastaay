@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -11,7 +10,7 @@ import (
 // maxConfigFileBytes protects against OOM from a hostile/accidental gigabyte config file.
 const maxConfigFileBytes = 5 << 20 // 5 MiB
 
-// LoadConfig reads and parses the YAML configuration file from the given path.
+// LoadConfig reads, sanitizes, and validates the YAML configuration file.
 func LoadConfig(filePath string) (*PastaayConfig, error) {
 	fi, err := os.Stat(filePath)
 	if err != nil {
@@ -26,16 +25,18 @@ func LoadConfig(filePath string) (*PastaayConfig, error) {
 		return nil, err
 	}
 
+	if hasSuspiciousYAMLAlias(file) {
+		return nil, fmt.Errorf("config file %s: YAML aliases are not permitted (potential alias-bomb)", filePath)
+	}
+
 	var cfg PastaayConfig
 	if err := yaml.Unmarshal(file, &cfg); err != nil {
 		return nil, err
 	}
 
-	return &cfg, nil
-}
-
-func decodeOrWarn(p *Policy, field string, node yaml.Node, dst interface{}) {
-	if err := node.Decode(dst); err != nil {
-		log.Printf("[WARN] policy %q: %s decode error: %v", p.Name, field, err)
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config %s validation: %w", filePath, err)
 	}
+
+	return &cfg, nil
 }
