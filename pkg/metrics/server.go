@@ -18,6 +18,9 @@ func StartServer(ctx context.Context, port string) {
 		Addr:              port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {
