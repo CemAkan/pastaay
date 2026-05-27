@@ -111,6 +111,12 @@ func (m *Manager) Update(newCfg *PastaayConfig) {
 			}
 			p.MetricTag = tag
 
+			// Wildcard detection
+			if strings.HasSuffix(p.Target, "*") && len(p.Target) > 1 {
+				p.IsWildcard = true
+				p.WildcardPrefix = strings.ToUpper(p.Target[:len(p.Target)-1])
+			}
+
 			// SQL Smart Boundary & Regex
 			if strings.EqualFold(p.Type, "sql") && !strings.EqualFold(p.Target, "ALL") && !strings.EqualFold(p.Target, "DATABASE") {
 				targetPattern := p.Target
@@ -140,7 +146,8 @@ func (m *Manager) Update(newCfg *PastaayConfig) {
 	cache := make(map[string][]Policy)
 	if newCfg != nil {
 		for _, p := range newCfg.Policies {
-			cache[p.Type] = append(cache[p.Type], p)
+			key := strings.ToLower(p.Type)
+			cache[key] = append(cache[key], p)
 		}
 	}
 	m.typedPolicies.Store(&cache)
@@ -152,7 +159,7 @@ func (m *Manager) GetActivePolicies(policyType string) []Policy {
 	if ptr == nil || (cfg != nil && time.Since(m.startTime) < cfg.WarmupDuration) {
 		return nil
 	}
-	return (*ptr)[policyType]
+	return (*ptr)[strings.ToLower(policyType)]
 }
 
 func CleanSQLCommand(cmd string) string {
