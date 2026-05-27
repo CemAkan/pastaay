@@ -169,6 +169,7 @@ func handlePlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	defer r.Body.Close()
 	var cfg config.PastaayConfig
 	if err := yaml.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -308,7 +309,11 @@ func handleProbe(w http.ResponseWriter, r *http.Request) {
 
 func handleDiscover(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	mfs, _ := prometheus.DefaultGatherer.Gather()
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	targets := make(map[string]bool)
 	targetList := []string{}
 	for _, mf := range mfs {
