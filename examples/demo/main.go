@@ -99,9 +99,17 @@ func main() {
 	web.RegisterHandlers(adminMux, cfgManager)
 
 	adminAddr := getEnv("ADMIN_ADDR", ":2112")
+	adminSrv := &http.Server{
+		Addr:              adminAddr,
+		Handler:           adminMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	go func() {
 		log.Printf("[INFO] Pastaay Admin Server listening on %s", adminAddr)
-		if err := http.ListenAndServe(adminAddr, adminMux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("[ERROR] Admin server crashed: %v", err)
 			stop()
 		}
@@ -169,10 +177,12 @@ func main() {
 	chaosHandler := ritual.Middleware(cfgManager)(mux)
 
 	srv := &http.Server{
-		Addr:         appAddr,
-		Handler:      chaosHandler,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:              appAddr,
+		Handler:           chaosHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Graceful Shutdown Orchestration
@@ -186,6 +196,9 @@ func main() {
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("[WARN] HTTP server shutdown: %v", err)
+		}
+		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("[WARN] Admin server shutdown: %v", err)
 		}
 
 		wg.Wait()
