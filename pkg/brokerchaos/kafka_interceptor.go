@@ -10,13 +10,18 @@ import (
 	"github.com/IBM/sarama"
 )
 
+// KafkaConsumerMiddleware wraps a Kafka consumer and applies chaos policies (latency, drop, synthetic errors) to incoming messages.
 type KafkaConsumerMiddleware struct {
 	evaluator Evaluator
 }
 
+// NewKafkaConsumerMiddleware creates a middleware backed by the given evaluator.
 func NewKafkaConsumerMiddleware(eval Evaluator) *KafkaConsumerMiddleware {
 	return &KafkaConsumerMiddleware{evaluator: eval}
 }
+
+// Intercept evaluates all active policies against the message. If the evaluator
+// decides to inject chaos, the appropriate fault is applied inline.
 
 func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.ConsumerMessage) (drop bool, err error) {
 	if msg == nil {

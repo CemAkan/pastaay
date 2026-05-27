@@ -73,6 +73,7 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 	}
 }
 
+// matchPath checks whether reqPath is covered by the policy, handling exact matches, wildcards (target ending with *), and the "all" sentinel.
 func matchPath(reqPath string, p *config.Policy) bool {
 	if strings.EqualFold(p.Target, "all") || strings.EqualFold(reqPath, p.Target) {
 		return true

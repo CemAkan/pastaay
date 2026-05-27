@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/event"
 )
 
+// NewChaosMonitor returns a MongoDB command monitor that evaluates everyn// started command against active Pastaay policies, injecting latency or aborting the command when a policy matches.
 func NewChaosMonitor(mgr *config.Manager) *event.CommandMonitor {
 	return &event.CommandMonitor{
 		Started: func(ctx context.Context, evt *event.CommandStartedEvent) {

@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+// ChaosDialer wraps the MongoDB dialer to optionally refuse connections based on active chaos policies.
 type ChaosDialer struct {
 	DefaultDialer options.ContextDialer
 	Manager       *config.Manager

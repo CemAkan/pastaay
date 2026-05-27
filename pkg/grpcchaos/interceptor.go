@@ -18,6 +18,7 @@ import (
 	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
+// PolicyDecision captures the chaos outcome for a particular gRPC method"'s policy match.
 type PolicyDecision struct {
 	Latency time.Duration
 	Err     error

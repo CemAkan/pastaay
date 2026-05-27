@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Policy defines a single chaos injection rule. Every field supports both snake_case (YAML) and camelCase (JSON/K8s) keys via custom UnmarshalYAML.
 type Policy struct {
 	Name              string            `yaml:"name" json:"name"`
 	Target            string            `yaml:"target" json:"target"`

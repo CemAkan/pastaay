@@ -11,14 +11,17 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+// RabbitMQMiddleware wraps an AMQP consumer and applies chaos policies (latency, drop, synthetic errors) to incoming deliveries.
 type RabbitMQMiddleware struct {
 	evaluator Evaluator
 }
 
+// NewRabbitMQMiddleware creates a middleware backed by the given evaluator.
 func NewRabbitMQMiddleware(eval Evaluator) *RabbitMQMiddleware {
 	return &RabbitMQMiddleware{evaluator: eval}
 }
 
+// Intercept evaluates all active policies against the delivery. If the evaluator decides to inject chaos, the appropriate fault is applied inline.
 func (m *RabbitMQMiddleware) Intercept(ctx context.Context, delivery *amqp.Delivery) (drop bool, err error) {
 	if delivery == nil {
 		return false, nil

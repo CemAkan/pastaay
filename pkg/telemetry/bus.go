@@ -72,13 +72,18 @@ func EmitError(protocol, target, msg, payload string, span trace.Span) {
 }
 
 func EmitInfo(protocol, message string, data map[string]interface{}, span trace.Span) {
-	data["level"] = "INFO"
-	data["protocol"] = protocol
-	data["message"] = message
-	if span != nil && span.SpanContext().IsValid() {
-		data["trace_id"] = span.SpanContext().TraceID().String()
-		data["span_id"] = span.SpanContext().SpanID().String()
+	// Avoid mutating the caller's map.
+	merged := make(map[string]interface{}, len(data)+5)
+	for k, v := range data {
+		merged[k] = v
 	}
-	jsonLog, _ := json.Marshal(data)
+	merged["level"] = "INFO"
+	merged["protocol"] = protocol
+	merged["message"] = message
+	if span != nil && span.SpanContext().IsValid() {
+		merged["trace_id"] = span.SpanContext().TraceID().String()
+		merged["span_id"] = span.SpanContext().SpanID().String()
+	}
+	jsonLog, _ := json.Marshal(merged)
 	Emit(nodeName, protocol, string(jsonLog))
 }

@@ -16,11 +16,13 @@ import (
 
 type chaosKey struct{}
 
+// WrapperConn wraps a driver.Conn and evaluates SQL chaos policies on every query, exec, prepare, and begin‑transaction call.
 type WrapperConn struct {
 	originalConn driver.Conn
 	cfgManager   *config.Manager
 }
 
+// WrapperStmt wraps a driver.Stmt and re‑evaluates chaos policies on each execution using the pre‑cleaned query string.
 type WrapperStmt struct {
 	originalStmt driver.Stmt
 	cleanQuery   string

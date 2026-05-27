@@ -5,10 +5,16 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"html/template"
+	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -24,6 +30,16 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+)
+
+const (
+	maxAPIRequestBytes = 1 << 20 // 1 MiB
+	probeTimeout       = 5 * time.Second
+)
+
+var (
+	modelNameRe  = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+	allowedProvs = map[string]bool{"openai": true, "deepseek": true, "gemini": true, "anthropic": true}
 )
 
 func emitLocal(name, msg string) { telemetry.Emit("local", name, msg) }
@@ -48,11 +64,8 @@ func startKubeLogStreamer(ctx context.Context, clientset *kubernetes.Clientset, 
 	}
 }
 
-func EmitLog(source, name, msg string) {
-	telemetry.Emit(source, name, msg)
-}
+func EmitLog(source, name, msg string) { telemetry.Emit(source, name, msg) }
 
-// watchAndStreamPods uses K8s Watch API
 func watchAndStreamPods(ctx context.Context, clientset *kubernetes.Clientset, namespace string) {
 	activeStreams := make(map[string]context.CancelFunc)
 	var mu sync.Mutex
@@ -115,10 +128,13 @@ func watchAndStreamPods(ctx context.Context, clientset *kubernetes.Clientset, na
 	}
 }
 
-// Auth middleware
+// requireConsoleToken enforces auth; in the empty-token mode it logs every
+// request to ensure the security gap is loud.
 func requireConsoleToken(expected string, next http.HandlerFunc) http.HandlerFunc {
+	disabled := expected == ""
 	return func(w http.ResponseWriter, r *http.Request) {
-		if expected == "" {
+		if disabled {
+			log.Printf("[Pastaay-Console] SECURITY: unauthenticated %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 			next(w, r)
 			return
 		}
@@ -138,7 +154,7 @@ func renderHTML(tmpl *template.Template, w http.ResponseWriter, page string) {
 	}
 }
 
-// Handlers
+// handleOracle delegates to the configured LLM provider, validates the modeln// name against a regex allow‑list, and returns the generated YAML blueprint.
 
 func handleOracle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -148,20 +164,29 @@ func handleOracle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider, Key, Model, Intensity, Prompt, Context string
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxAPIRequestBytes)).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
+	if !allowedProvs[req.Provider] {
+		http.Error(w, "unsupported provider", http.StatusBadRequest)
+		return
+	}
+	if req.Model != "" && !modelNameRe.MatchString(req.Model) {
+		http.Error(w, "invalid model name", http.StatusBadRequest)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	resp, err := oracle.AskOracle(req.Provider, req.Key, req.Model, req.Intensity, req.Prompt, req.Context)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]string{"response": resp, "yaml": oracle.ExtractYAML(resp)})
+	_ = json.NewEncoder(w).Encode(map[string]string{"response": resp, "yaml": oracle.ExtractYAML(resp)})
 }
 
 func handlePlan(w http.ResponseWriter, r *http.Request) {
@@ -170,19 +195,25 @@ func handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-	var cfg config.PastaayConfig
-	if err := yaml.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+
+	result, err := guard.PlanFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	json.NewEncoder(w).Encode(guard.Analyze(&cfg))
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func handleRollback(mgr *config.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		mgr.Update(&config.PastaayConfig{Version: 1, Policies: []config.Policy{}})
 		emitLocal("pastaay", "rollback executed — all policies cleared")
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}
 }
 
@@ -225,7 +256,7 @@ func handleState(mgr *config.Manager) http.HandlerFunc {
 			"engine_logs":     telemetry.Snapshot(),
 		}
 
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -260,8 +291,59 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	json.NewEncoder(w).Encode(metricsList)
+	_ = json.NewEncoder(w).Encode(metricsList)
 }
+
+// safeProbeTransport rejects connections to private / loopback / link-local /
+// multicast / unspecified ranges and refuses any redirect.
+var safeProbeTransport = &http.Transport{
+	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			if isInternalIP(ip.IP) {
+				return nil, fmt.Errorf("pastaay: refused to dial internal address %s", ip.IP)
+			}
+		}
+		d := &net.Dialer{Timeout: 3 * time.Second}
+		return d.DialContext(ctx, network, addr)
+	},
+	ResponseHeaderTimeout: probeTimeout,
+}
+
+var safeProbeClient = &http.Client{
+	Transport: safeProbeTransport,
+	Timeout:   probeTimeout,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return errors.New("pastaay: redirects are disabled for probe targets")
+	},
+}
+
+func isInternalIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	// IPv4: AWS/GCP/Azure metadata (169.254.169.254 caught by IsLinkLocal),
+	// shared address space (100.64.0.0/10).
+	if v4 := ip.To4(); v4 != nil {
+		if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
+			return true
+		}
+	}
+	return false
+}
+
+// handleProbe performs an HTTP GET against a user‑supplied URL through an// hardened transport that refuses connections to internal/loopback addresses.
 
 func handleProbe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -271,7 +353,7 @@ func handleProbe(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxAPIRequestBytes)).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -282,29 +364,44 @@ func handleProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	start := time.Now()
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(req.URL)
-	elapsed := time.Since(start).Milliseconds()
-
-	result := map[string]interface{}{
-		"elapsed_ms": elapsed,
+	u, err := url.Parse(req.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		http.Error(w, "url must be http(s) with explicit host", http.StatusBadRequest)
+		return
 	}
+
+	result := map[string]interface{}{}
+	w.Header().Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	defer cancel()
+
+	probeReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
+	if err != nil {
+		result["status"] = 0
+		result["error"] = err.Error()
+		_ = json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	start := time.Now()
+	resp, err := safeProbeClient.Do(probeReq)
+	elapsed := time.Since(start).Milliseconds()
+	result["elapsed_ms"] = elapsed
 
 	if err != nil {
 		result["status"] = 0
 		result["error"] = err.Error()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+		_ = json.NewEncoder(w).Encode(result)
 		return
 	}
 	defer resp.Body.Close()
+	// Drain at most 4 KiB so we never load attacker bodies.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 
 	result["status"] = resp.StatusCode
 	result["error"] = nil
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func handleDiscover(w http.ResponseWriter, r *http.Request) {
@@ -331,13 +428,12 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	json.NewEncoder(w).Encode(targetList)
+	_ = json.NewEncoder(w).Encode(targetList)
 }
 
 func RegisterHandlers(mux *http.ServeMux, mgr *config.Manager) {
 	adminToken := os.Getenv("PASTAAY_WEBHOOK_TOKEN")
 
-	// K8s watcher
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 		if restConfig, err := rest.InClusterConfig(); err == nil {
 			if clientset, csErr := kubernetes.NewForConfig(restConfig); csErr == nil {
