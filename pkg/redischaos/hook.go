@@ -59,7 +59,7 @@ func (h *ChaosHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 					telemetry.EmitError("redis", cmd.Name(), "Redis Fault Injected", p.ErrorBody, span)
 
 					span.End()
-					return redis.Nil
+					return errors.New("pastaay: synthetic redis fault")
 				}
 
 			}
@@ -77,25 +77,40 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 		hasError := false
 
 		protected := make([]bool, len(cmds))
-
+		anyUnprotected := false
 		for i := range cmds {
-			cmd := cmds[i]
-			if h.mgr.IsCommandIgnored("redis", cmd.Name()) {
+			if h.mgr.IsCommandIgnored("redis", cmds[i].Name()) {
 				protected[i] = true
 				continue
 			}
+			anyUnprotected = true
+		}
+
+		// Roll dice ONCE per policy across the whole pipeline
+		if anyUnprotected {
 			for _, p := range policies {
-				if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, cmd.Name()) {
-					if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
-						if p.LatencyDuration > maxLatency {
-							maxLatency = p.LatencyDuration
-							latencyTag = p.MetricTag
-						}
+				matchesAny := false
+				for i := range cmds {
+					if protected[i] {
+						continue
 					}
-					if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
-						hasError = true
-						errorTag = p.MetricTag
+					if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, cmds[i].Name()) {
+						matchesAny = true
+						break
 					}
+				}
+				if !matchesAny {
+					continue
+				}
+				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
+					if p.LatencyDuration > maxLatency {
+						maxLatency = p.LatencyDuration
+						latencyTag = p.MetricTag
+					}
+				}
+				if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+					hasError = true
+					errorTag = p.MetricTag
 				}
 			}
 		}
@@ -103,8 +118,9 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 		if maxLatency > 0 {
 			metrics.InjectedFaultsTotal.WithLabelValues(latencyTag, "latency").Inc()
 			spanCtx, span := tracing.StartChaosSpan(ctx, "pastaay.redis.pipeline_latency", "pipeline", "latency")
-			telemetry.EmitInfo("redis", "Redis Pipeline Latency Injected", map[string]interface{}{"duration": maxLatency.String(), "target": "pipeline"}, span)
-
+			telemetry.EmitInfo("redis", "Redis Pipeline Latency Injected", map[string]interface{}{
+				"duration": maxLatency.String(), "target": "pipeline",
+			}, span)
 			timer := time.NewTimer(maxLatency)
 			select {
 			case <-timer.C:
@@ -135,6 +151,7 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 			}
 			metrics.InjectedFaultsTotal.WithLabelValues(targetTag, "error").Inc()
 			_, span := tracing.StartChaosSpan(ctx, "pastaay.redis.pipeline_error", "pipeline", "error")
+			defer span.End()
 
 			chaosErr := errors.New("pastaay: redis pipeline batch aborted due to chaos policy")
 			for i := range cmds {
@@ -145,8 +162,6 @@ func (h *ChaosHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 			}
 
 			telemetry.EmitError("redis", "pipeline", "Redis Pipeline Batch Aborted", "batch aborted due to chaos policy", span)
-			span.End()
-
 			return chaosErr
 		}
 		return next(ctx, cmds)

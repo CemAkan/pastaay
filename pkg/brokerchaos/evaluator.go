@@ -19,12 +19,19 @@ type defaultEvaluator struct {
 	provider ConfigProvider
 }
 
+// NewEvaluator panics fast on nil provider to surface misconfiguration at boot rather than per-message in production.
 func NewEvaluator(provider ConfigProvider) Evaluator {
+	if provider == nil {
+		panic("brokerchaos: NewEvaluator received nil ConfigProvider")
+	}
 	return &defaultEvaluator{provider: provider}
 }
 
 func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error, string, string) {
-	if msgCtx == nil || e.provider.IsCommandIgnored(string(msgCtx.Protocol), msgCtx.Topic) {
+	if e == nil || e.provider == nil || msgCtx == nil {
+		return false, 0, nil, "", ""
+	}
+	if e.provider.IsCommandIgnored(string(msgCtx.Protocol), msgCtx.Topic) {
 		return false, 0, nil, "", ""
 	}
 
