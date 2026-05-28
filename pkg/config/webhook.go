@@ -25,8 +25,7 @@ type WebhookResponse struct {
 	Details string `json:"details,omitempty"`
 }
 
-// WebhookHandler provides a memory-bounded, constant-time authenticated endpoint.
-// Empty expectedToken refuses requests unless PASTAAY_DEV_ALLOW_NO_TOKEN=1.
+// WebhookHandler validates and stores config with auth + size limits.
 func WebhookHandler(expectedToken string, reloadCallback func(*PastaayConfig)) http.HandlerFunc {
 	devAllow := os.Getenv("PASTAAY_DEV_ALLOW_NO_TOKEN") == "1"
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -89,13 +88,13 @@ func WebhookHandler(expectedToken string, reloadCallback func(*PastaayConfig)) h
 	}
 }
 
-// hasSuspiciousYAMLAlias is a conservative pre-filter against billion-laughs (alias-bomb) DoS.
+// hasSuspiciousYAMLAlias detects YAML alias-bomb patterns.
 func hasSuspiciousYAMLAlias(body []byte) bool {
 	s := stripYAMLStringLiterals(string(body))
 	return reYAMLAnchor.MatchString(s) && reYAMLAlias.MatchString(s)
 }
 
-// stripYAMLStringLiterals removes single/double-quoted regions so that values
+// stripYAMLStringLiterals removes quoted regions to avoid false positives.
 func stripYAMLStringLiterals(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

@@ -49,7 +49,7 @@ func (m *Manager) GetSensorStatuses() map[string]string {
 	return res
 }
 
-// canonicalFloat64Bits canonicalizes negative zero and NaN so two configs
+// canonicalFloat64Bits collapses ±0 and NaN.
 func canonicalFloat64Bits(v float64) uint64 {
 	if math.IsNaN(v) {
 		return 0x7FF8000000000001 // canonical quiet NaN
@@ -248,6 +248,9 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 		if list, ok := DefaultProtectedCommands[protocol]; ok {
 			for _, protected := range list {
 				p := strings.TrimLeft(strings.ToUpper(protected), "/")
+				if p == "" {
+					continue
+				}
 				if strings.HasPrefix(cleanCmd, p) {
 					return true
 				}
@@ -258,6 +261,9 @@ func (m *Manager) IsCleanCommandIgnored(protocol string, cleanCmd string) bool {
 		if customList, ok := cfg.IgnoredCommands[protocol]; ok {
 			for _, custom := range customList {
 				c := strings.TrimLeft(strings.ToUpper(custom), "/")
+				if c == "" {
+					continue
+				}
 				if strings.HasPrefix(cleanCmd, c) {
 					return true
 				}

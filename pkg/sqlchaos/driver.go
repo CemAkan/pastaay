@@ -44,7 +44,7 @@ func (c *fallbackConnector) Connect(ctx context.Context) (driver.Conn, error) {
 }
 func (c *fallbackConnector) Driver() driver.Driver { return c.driver }
 
-// OpenConnector returns a chaos‑aware connector or falls back to a compatibility wrapper if the underlying driver lacks DriverContext.
+// OpenConnector returns a chaos-aware connector or falls back to a compat wrapper.
 func (d *WrapperDriver) OpenConnector(name string) (driver.Connector, error) {
 	if dc, ok := d.original.(driver.DriverContext); ok {
 		connector, err := dc.OpenConnector(name)
@@ -88,9 +88,11 @@ func applyConnectionChaos(ctx context.Context, mgr *config.Manager) error {
 		}
 
 		metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
+		// Defer span.End so any panic in telemetry.EmitError still closes the
+		// span and does not leak an active OTLP recording.
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.sql.drop", p.Target, "drop")
+		defer span.End()
 		telemetry.EmitError("sql", p.Target, "Connection force dropped", "TCP stream severed by DropConnection policy", span)
-		span.End()
 		return errors.New("[Pastaay-SQL] Chaos: TCP connection forcefully dropped")
 	}
 	return nil

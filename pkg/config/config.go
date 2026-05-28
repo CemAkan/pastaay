@@ -12,14 +12,15 @@ import (
 )
 
 const (
-	maxConfigVersion    = 1
-	maxLatencyDuration  = 1 * time.Hour
-	maxRAMInterval      = 1 * time.Hour
-	maxThrottleCeiling  = 10_000_000
-	maxRAMChunkPerEntry = 4096
+	maxConfigVersion     = 1
+	maxLatencyDuration   = 1 * time.Hour
+	maxRAMInterval       = 1 * time.Hour
+	maxThrottleCeiling   = 10_000_000
+	maxRAMChunkPerEntry  = 4096
+	maxPoliciesPerConfig = 1024
 )
 
-// Policy defines a single chaos injection rule. Every field supports both snake_case (YAML) and camelCase (JSON/K8s) keys via custom UnmarshalYAML.
+// Policy defines a chaos injection rule with dual snake_case/camelCase support.
 type Policy struct {
 	Name              string            `yaml:"name" json:"name"`
 	Target            string            `yaml:"target" json:"target"`
@@ -65,7 +66,7 @@ func configDecodeDuration(node yaml.Node, fieldName string, target *time.Duratio
 	*target = d
 }
 
-// UnmarshalYAML implements custom dual-casing support to capture both snake_case and camelCase parameters.
+// UnmarshalYAML supports both snake_case and camelCase keys.
 func (p *Policy) UnmarshalYAML(value *yaml.Node) error {
 	type shadowPolicy Policy
 	var s shadowPolicy
@@ -153,7 +154,7 @@ var validStreamRollModes = map[string]bool{
 	"stream":    true,
 }
 
-// Validate performs strict bounds checking and protocol-specific sanity checks.
+// Validate checks bounds and protocol-specific constraints.
 func (c *PastaayConfig) Validate() error {
 	var errs []error
 
@@ -165,6 +166,9 @@ func (c *PastaayConfig) Validate() error {
 	}
 	if c.WarmupDuration > 24*time.Hour {
 		errs = append(errs, errors.New("global: warmup_duration unreasonably large (>24h)"))
+	}
+	if len(c.Policies) > maxPoliciesPerConfig {
+		errs = append(errs, fmt.Errorf("global: policy count %d exceeds ceiling %d", len(c.Policies), maxPoliciesPerConfig))
 	}
 
 	for i, p := range c.Policies {

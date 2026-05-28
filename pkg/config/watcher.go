@@ -26,25 +26,43 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) (cancel f
 	}
 
 	var (
-		timer   *time.Timer
-		timerMu sync.Mutex
+		timer    *time.Timer
+		timerMu  sync.Mutex
+		fireWG   sync.WaitGroup // tracks in-flight debounced reload bodies
+		stopFlag = make(chan struct{})
 	)
 
-	// scheduleReload coalesces every kind of event onto the debounce window.
 	scheduleReload := func(reason string) {
 		timerMu.Lock()
 		defer timerMu.Unlock()
+		select {
+		case <-stopFlag:
+			return
+		default:
+		}
 		if timer != nil {
 			timer.Stop()
 		}
 		timer = time.AfterFunc(debounceWindow, func() {
+			fireWG.Add(1)
+			defer fireWG.Done()
+			// Re-check stop flag
+			select {
+			case <-stopFlag:
+				return
+			default:
+			}
 
 			_ = watcher.Remove(filePath)
 			for attempt := 0; attempt < 10; attempt++ {
 				if err := watcher.Add(filePath); err == nil {
 					break
 				}
-				time.Sleep(50 * time.Millisecond)
+				select {
+				case <-stopFlag:
+					return
+				case <-time.After(50 * time.Millisecond):
+				}
 			}
 
 			newCfg, loadErr := LoadConfig(filePath)
@@ -56,14 +74,19 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) (cancel f
 				log.Printf("[Pastaay-Config] reload rejected (%s): %v", reason, vErr)
 				return
 			}
+			select {
+			case <-stopFlag:
+				return
+			default:
+			}
 			reloadCallback(newCfg)
 		})
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var loopWG sync.WaitGroup
+	loopWG.Add(1)
 	go func() {
-		defer wg.Done()
+		defer loopWG.Done()
 		defer watcher.Close()
 		for {
 			select {
@@ -89,14 +112,15 @@ func WatchConfig(filePath string, reloadCallback func(*PastaayConfig)) (cancel f
 	}()
 
 	cancel = func() {
+		close(stopFlag)
 		cancelCtx()
-		// Stop any pending debounce timer to avoid spurious post-cancel reloads.
 		timerMu.Lock()
 		if timer != nil {
 			timer.Stop()
 		}
 		timerMu.Unlock()
-		wg.Wait()
+		loopWG.Wait()
+		fireWG.Wait()
 	}
 	return cancel, nil
 }
