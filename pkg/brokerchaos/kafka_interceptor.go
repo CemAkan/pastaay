@@ -1,6 +1,7 @@
 package brokerchaos
 
 import (
+	"bytes"
 	"context"
 	"time"
 
@@ -33,18 +34,10 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 		Protocol:  ProtocolKafka,
 		Partition: msg.Partition,
 		GetHeader: func(key string) (string, bool) {
+			keyBytes := []byte(key)
 			for _, h := range msg.Headers {
-				if len(h.Key) == len(key) {
-					match := true
-					for i := 0; i < len(key); i++ {
-						if h.Key[i] != key[i] {
-							match = false
-							break
-						}
-					}
-					if match {
-						return string(h.Value), true
-					}
+				if bytes.Equal(h.Key, keyBytes) {
+					return string(h.Value), true
 				}
 			}
 			return "", false

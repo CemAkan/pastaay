@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"log"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -14,11 +15,23 @@ import (
 	"github.com/CemAkan/pastaay/pkg/tracing"
 )
 
-// maxRAMPoolMB is a global per-process ceiling to prevent the engine from self-OOMing when policies request unbounded RAM allocations.
+// maxRAMPoolMB caps total RAM allocated by LeakRAM across all policies.
 const maxRAMPoolMB int64 = 4096
 
+// burnerInnerIterations bounds how many SHA-256 ops we run between context checks.
+const burnerInnerIterations = 1024
+
+var burnerSink atomic.Uint64
+
 // currentPoolMB tracks total live LeakRAM allocation in megabytes.
-var currentPoolMB int64
+var currentPoolMB atomic.Int64
+
+var systemPageSize = func() int {
+	if ps := os.Getpagesize(); ps > 0 {
+		return ps
+	}
+	return 4096
+}()
 
 // ResourcePolicy holds the configuration for OS-level resource sabotage.
 type ResourcePolicy struct {
@@ -41,31 +54,45 @@ func BurnCPU(ctx context.Context, cores int, threshold int) {
 	if cores <= 0 {
 		cores = runtime.NumCPU()
 	}
-	if threshold <= 0 {
-		threshold = 100000
+
+	inner := threshold
+	if inner <= 0 || inner > burnerInnerIterations {
+		inner = burnerInnerIterations
 	}
 
 	var wg sync.WaitGroup
 	for i := 0; i < cores; i++ {
 		wg.Add(1)
-		go func() {
+		go func(seed uint64) {
 			defer wg.Done()
-			payload := []byte("pastaay-cpu-vector")
-			var localSink [32]byte
-			for {
-				for j := 0; j < threshold; j++ {
-					localSink = sha256.Sum256(payload)
-				}
 
-				runtime.KeepAlive(localSink)
+			payload := []byte("pastaay-cpu-vector-XXXXXXXX")
+			ctr := seed
+			for {
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					continue
 				}
+				var local uint64
+				for j := 0; j < inner; j++ {
+					ctr++
+					// Embed the counter
+					payload[len(payload)-8] = byte(ctr)
+					payload[len(payload)-7] = byte(ctr >> 8)
+					payload[len(payload)-6] = byte(ctr >> 16)
+					payload[len(payload)-5] = byte(ctr >> 24)
+					payload[len(payload)-4] = byte(ctr >> 32)
+					payload[len(payload)-3] = byte(ctr >> 40)
+					payload[len(payload)-2] = byte(ctr >> 48)
+					payload[len(payload)-1] = byte(ctr >> 56)
+					sum := sha256.Sum256(payload)
+					local ^= uint64(sum[0]) | uint64(sum[8])<<8 |
+						uint64(sum[16])<<16 | uint64(sum[24])<<24
+				}
+				burnerSink.Add(local + 1)
 			}
-		}()
+		}(uint64(i) * 0x9E3779B97F4A7C15)
 	}
 	wg.Wait()
 }
@@ -83,27 +110,37 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	defer ticker.Stop()
 
 	chunkSize := chunkMB * 1024 * 1024
-	var pool [][]byte
+	pool := make([][]byte, 0, 16)
 
+	// addedMB tracks how much this goroutine added to currentPoolMB.
+	var addedMB int64
 	defer func() {
-		atomic.AddInt64(&currentPoolMB, -int64(len(pool)*chunkMB))
+		if addedMB > 0 {
+			currentPoolMB.Add(-addedMB)
+		}
 		pool = nil
 		runtime.GC()
 	}()
 
-	// DRY allocation logic with hard ceiling enforcement.
 	allocate := func() bool {
-		if atomic.LoadInt64(&currentPoolMB)+int64(chunkMB) > maxRAMPoolMB {
-			log.Printf("[Pastaay-Resource] RAM ceiling %dMB reached, refusing new chunk (%dMB)", maxRAMPoolMB, chunkMB)
-			return false
+		want := int64(chunkMB)
+		for {
+			cur := currentPoolMB.Load()
+			if cur+want > maxRAMPoolMB {
+				log.Printf("[Pastaay-Resource] RAM ceiling %dMB reached, refusing new chunk (%dMB)", maxRAMPoolMB, chunkMB)
+				return false
+			}
+			if currentPoolMB.CompareAndSwap(cur, cur+want) {
+				break
+			}
 		}
 		chunk := make([]byte, chunkSize)
-		// Page-forcing
-		for i := 0; i < chunkSize; i += 4096 {
+
+		for i := 0; i < chunkSize; i += systemPageSize {
 			chunk[i] = 1
 		}
 		pool = append(pool, chunk)
-		atomic.AddInt64(&currentPoolMB, int64(chunkMB))
+		addedMB += want
 		return true
 	}
 
@@ -119,43 +156,61 @@ func LeakRAM(ctx context.Context, chunkMB int, interval time.Duration) {
 	}
 }
 
-// TriggerResourceSabotage safely dispatches resource chaos.
-func TriggerResourceSabotage(ctx context.Context, policy ResourcePolicy) {
+// TriggerResourceSabotage dispatches resource chaos under the given context.
+func TriggerResourceSabotage(ctx context.Context, policy ResourcePolicy, wg *sync.WaitGroup) {
 	if policy.CPU.Enabled {
-
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.resource.cpu", "CPU Burner Activated", "burner")
-
 		telemetry.EmitInfo("resource", "CPU Burner Activated", map[string]interface{}{
 			"cores": policy.CPU.Cores, "threshold": policy.CPU.ThrottleThreshold,
 		}, span)
 
+		if wg != nil {
+			wg.Add(1)
+		}
 		if policy.CPU.Duration > 0 {
 			cpuCtx, cancel := context.WithTimeout(ctx, policy.CPU.Duration)
 			go func() {
 				defer cancel()
+				if wg != nil {
+					defer wg.Done()
+				}
 				BurnCPU(cpuCtx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
 			}()
 		} else {
-			go BurnCPU(ctx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
+			go func() {
+				if wg != nil {
+					defer wg.Done()
+				}
+				BurnCPU(ctx, policy.CPU.Cores, policy.CPU.ThrottleThreshold)
+			}()
 		}
 	}
 
 	if policy.RAM.Enabled {
-
 		_, span := tracing.StartChaosSpan(ctx, "pastaay.resource.ram", "RAM Leaker Activated", "leaker")
-
 		telemetry.EmitInfo("resource", "RAM Leaker Activated", map[string]interface{}{
 			"chunk_mb": policy.RAM.ChunkMB, "interval": policy.RAM.Interval.String(),
 		}, span)
 
+		if wg != nil {
+			wg.Add(1)
+		}
 		if policy.RAM.Duration > 0 {
 			ramCtx, cancel := context.WithTimeout(ctx, policy.RAM.Duration)
 			go func() {
 				defer cancel()
+				if wg != nil {
+					defer wg.Done()
+				}
 				LeakRAM(ramCtx, policy.RAM.ChunkMB, policy.RAM.Interval)
 			}()
 		} else {
-			go LeakRAM(ctx, policy.RAM.ChunkMB, policy.RAM.Interval)
+			go func() {
+				if wg != nil {
+					defer wg.Done()
+				}
+				LeakRAM(ctx, policy.RAM.ChunkMB, policy.RAM.Interval)
+			}()
 		}
 	}
 }
@@ -167,22 +222,30 @@ func MonitorAndTrigger(ctx context.Context, mgr *config.Manager) {
 
 	var lastResourceHash uint64
 	var activeCancel context.CancelFunc
+	var activeWG *sync.WaitGroup
+
+	cleanup := func() {
+		if activeCancel != nil {
+			activeCancel()
+			activeCancel = nil
+		}
+		if activeWG != nil {
+			activeWG.Wait()
+			activeWG = nil
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			if activeCancel != nil {
-				activeCancel()
-			}
+			cleanup()
 			return
 		case <-ticker.C:
 			policies := mgr.GetActivePolicies("resource")
 
-			// Immediate kill-switch on rollback
 			if len(policies) == 0 {
 				if activeCancel != nil {
-					activeCancel()
-					activeCancel = nil
+					cleanup()
 					lastResourceHash = 0
 				}
 				continue
@@ -190,36 +253,35 @@ func MonitorAndTrigger(ctx context.Context, mgr *config.Manager) {
 
 			var combinedHash uint64
 			for _, p := range policies {
-				combinedHash = (combinedHash<<1 | combinedHash>>63) ^ p.PolicyHash
+				combinedHash ^= p.PolicyHash
 			}
 
-			if combinedHash != lastResourceHash {
-				// Kill previous chaos if any
-				if activeCancel != nil {
-					activeCancel()
+			if combinedHash == lastResourceHash {
+				continue
+			}
+
+			cleanup()
+			lastResourceHash = combinedHash
+
+			chaosCtx, cancel := context.WithCancel(ctx)
+			activeCancel = cancel
+			activeWG = &sync.WaitGroup{}
+
+			for _, p := range policies {
+				rp := ResourcePolicy{}
+				if p.LatencyDuration > 0 {
+					rp.CPU.Enabled = true
+					rp.CPU.Duration = p.LatencyDuration
+					rp.CPU.Cores = 0
+					rp.CPU.ThrottleThreshold = p.ThrottleThreshold
 				}
-
-				lastResourceHash = combinedHash
-
-				var chaosCtx context.Context
-				chaosCtx, activeCancel = context.WithCancel(ctx)
-
-				for _, p := range policies {
-					rp := ResourcePolicy{}
-					if p.LatencyDuration > 0 {
-						rp.CPU.Enabled = true
-						rp.CPU.Duration = p.LatencyDuration
-						rp.CPU.Cores = 0
-						rp.CPU.ThrottleThreshold = p.ThrottleThreshold
-					}
-					if p.RAMChunkMB > 0 {
-						rp.RAM.Enabled = true
-						rp.RAM.ChunkMB = p.RAMChunkMB
-						rp.RAM.Interval = p.RAMInterval
-						rp.RAM.Duration = p.LatencyDuration
-					}
-					TriggerResourceSabotage(chaosCtx, rp)
+				if p.RAMChunkMB > 0 {
+					rp.RAM.Enabled = true
+					rp.RAM.ChunkMB = p.RAMChunkMB
+					rp.RAM.Interval = p.RAMInterval
+					rp.RAM.Duration = p.LatencyDuration
 				}
+				TriggerResourceSabotage(chaosCtx, rp, activeWG)
 			}
 		}
 	}
