@@ -19,6 +19,7 @@ func (m *mockCmder) Name() string { return m.name }
 
 func TestRedisHook_ErrorInjection(t *testing.T) {
 	mgr := config.NewManager(&config.PastaayConfig{
+		Version: 1,
 		Policies: []config.Policy{
 			{
 				Type:        "redis",

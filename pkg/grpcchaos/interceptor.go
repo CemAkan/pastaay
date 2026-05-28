@@ -30,7 +30,7 @@ type chaosServerStream struct {
 	method          string
 	cfgManager      *config.Manager
 	mu              sync.Mutex
-	decidedPolicies map[string]PolicyDecision
+	decidedPolicies map[uint64]PolicyDecision // keyed by PolicyHash (Name is not unique)
 	isIgnored       bool
 	incomingMD      metadata.MD
 }
@@ -58,7 +58,7 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 
 			if isStreamMode && s.decidedPolicies != nil {
 				s.mu.Lock()
-				d, decided := s.decidedPolicies[p.Name]
+				d, decided := s.decidedPolicies[p.PolicyHash]
 
 				if decided && d.Hash == p.PolicyHash {
 					s.mu.Unlock()
@@ -82,21 +82,31 @@ func (s *chaosServerStream) evaluate(ctx context.Context, next func() error) err
 					continue
 				}
 
-				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
+				latencyHit := p.LatencyChance > 0 && rand.Float64() < p.LatencyChance
+				errorHit := p.ErrorChance > 0 && rand.Float64() < p.ErrorChance
+				if latencyHit && errorHit {
+					latencyHit = false
+				}
+				if latencyHit {
 					decision.Latency = p.LatencyDuration
 				}
-				if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+				if errorHit {
 					decision.Err = generateError(p)
 				}
 				decision.Hash = p.PolicyHash
 
-				s.decidedPolicies[p.Name] = decision
+				s.decidedPolicies[p.PolicyHash] = decision
 				s.mu.Unlock()
 			} else {
-				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
+				latencyHit := p.LatencyChance > 0 && rand.Float64() < p.LatencyChance
+				errorHit := p.ErrorChance > 0 && rand.Float64() < p.ErrorChance
+				if latencyHit && errorHit {
+					latencyHit = false
+				}
+				if latencyHit {
 					decision.Latency = p.LatencyDuration
 				}
-				if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+				if errorHit {
 					decision.Err = generateError(p)
 				}
 			}
@@ -202,7 +212,7 @@ func StreamInterceptor(mgr *config.Manager) grpc.StreamServerInterceptor {
 			ServerStream:    ss,
 			method:          info.FullMethod,
 			cfgManager:      mgr,
-			decidedPolicies: make(map[string]PolicyDecision),
+			decidedPolicies: make(map[uint64]PolicyDecision),
 			isIgnored:       mgr.IsCommandIgnored("grpc", info.FullMethod),
 			incomingMD:      md,
 		}

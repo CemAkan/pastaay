@@ -19,7 +19,7 @@ type defaultEvaluator struct {
 	provider ConfigProvider
 }
 
-// NewEvaluator panics fast on nil provider to surface misconfiguration at boot rather than per-message in production.
+// NewEvaluator panics on nil provider to fail at startup, not in production.
 func NewEvaluator(provider ConfigProvider) Evaluator {
 	if provider == nil {
 		panic("brokerchaos: NewEvaluator received nil ConfigProvider")
@@ -67,13 +67,18 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 			}
 		}
 
-		// Latency: take the longest among policies that win the roll.
-		if p.LatencyChance > 0 && p.LatencyDuration > delayDuration && rand.Float64() < p.LatencyChance {
+		latencyHit := p.LatencyChance > 0 && rand.Float64() < p.LatencyChance
+		errorHit := p.ErrorChance > 0 && rand.Float64() < p.ErrorChance
+		if latencyHit && errorHit {
+			latencyHit = false
+		}
+
+		if latencyHit && p.LatencyDuration > delayDuration {
 			delayDuration = p.LatencyDuration
 			latencyTag = p.MetricTag
 		}
 
-		if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+		if errorHit {
 			errorTag = p.MetricTag
 			if p.DropConnection {
 				shouldDrop = true

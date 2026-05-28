@@ -108,3 +108,26 @@ func TestGenerateError(t *testing.T) {
 		t.Errorf("Custom error generation failed: %v", err2)
 	}
 }
+func TestStreamCache_KeyedByHashNotName(t *testing.T) {
+	a := config.Policy{Name: "duo", Type: "grpc", Target: "all", LatencyChance: 1.0, ErrorChance: 0, StreamRollMode: "stream"}
+	b := config.Policy{Name: "duo", Type: "grpc", Target: "all", LatencyChance: 0, ErrorChance: 1.0, StreamRollMode: "stream"}
+
+	mgr := config.NewManager(&config.PastaayConfig{
+		Version:  1,
+		Policies: []config.Policy{a, b},
+	})
+	got := mgr.GetActivePolicies("grpc")
+	if len(got) != 2 {
+		t.Fatalf("expected both policies to survive Update, got %d", len(got))
+	}
+	if got[0].PolicyHash == got[1].PolicyHash {
+		t.Fatalf("policies with different rolls must have different PolicyHash; got %x", got[0].PolicyHash)
+	}
+	//keyed by hash, both policies fit.
+	cache := make(map[uint64]PolicyDecision)
+	cache[got[0].PolicyHash] = PolicyDecision{Hash: got[0].PolicyHash}
+	cache[got[1].PolicyHash] = PolicyDecision{Hash: got[1].PolicyHash}
+	if len(cache) != 2 {
+		t.Fatalf("hash-keyed cache must hold both same-named policies, got %d", len(cache))
+	}
+}

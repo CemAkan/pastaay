@@ -9,10 +9,10 @@ import (
 	"go.mongodb.org/mongo-driver/v2/event"
 )
 
-// TestChaosDialer_DropConnection verifies that the dialer correctly drops connections
-// when the DropConnection policy is active.
+// TestChaosDialer_DropConnection verifies that the dialer correctly drops connections when the DropConnection policy is active.
 func TestChaosDialer_DropConnection(t *testing.T) {
 	mgr := config.NewManager(&config.PastaayConfig{
+		Version: 1,
 		Policies: []config.Policy{
 			{
 				Type:           "mongo",
@@ -38,11 +38,11 @@ func TestChaosDialer_DropConnection(t *testing.T) {
 	}
 }
 
-// TestChaosMonitor_Latency verifies that the monitor correctly injects
-// the specified sleep duration during command execution.
+// TestChaosMonitor_Latency verifies that the monitor correctly injects the specified sleep duration during command execution.
 func TestChaosMonitor_Latency(t *testing.T) {
 	latency := 100 * time.Millisecond
 	mgr := config.NewManager(&config.PastaayConfig{
+		Version: 1,
 		Policies: []config.Policy{
 			{
 				Type:            "mongo",
