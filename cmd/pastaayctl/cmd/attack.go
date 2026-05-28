@@ -214,10 +214,16 @@ func executeHTTPInjection(payload []byte) {
 func executeRedisBroadcast(payload []byte) {
 	addr := os.Getenv("PASTAAY_REDIS_ADDR")
 	if addr == "" {
-		addr = "localhost:6380"
+		fmt.Printf("%s[!] PASTAAY_REDIS_ADDR is not set — refusing to publish chaos policies to an implicit address.%s\n", cRed, cReset)
+		fmt.Printf("    %s(set PASTAAY_REDIS_ADDR explicitly; for local dev export PASTAAY_REDIS_ADDR=localhost:6379)%s\n", cGray, cReset)
+		return
 	}
 
-	rdb := redis.NewClient(&redis.Options{Addr: addr})
+	opts := &redis.Options{Addr: addr}
+	if pw := os.Getenv("PASTAAY_REDIS_PASSWORD"); pw != "" {
+		opts.Password = pw
+	}
+	rdb := redis.NewClient(opts)
 	defer rdb.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

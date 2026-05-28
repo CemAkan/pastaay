@@ -80,8 +80,11 @@ func main() {
 		log.Fatalf("[FATAL] Core configuration load failure: %v", err)
 	}
 	cfgManager := config.NewManager(cfg)
-	if err := config.WatchConfig(cfgPath, cfgManager.Update); err != nil {
-		log.Printf("[WARN] config hot-reload watcher disabled: %v", err)
+	stopWatcher, werr := config.WatchConfig(cfgPath, cfgManager.Update)
+	if werr != nil {
+		log.Printf("[WARN] config hot-reload watcher disabled: %v", werr)
+	} else {
+		defer stopWatcher()
 	}
 
 	// Admin Server
@@ -96,7 +99,7 @@ func main() {
 	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(webhookToken, cfgManager.Update))
 	adminMux.HandleFunc("/chaos/export", config.ExportHandler(cfgManager))
 
-	web.RegisterHandlers(adminMux, cfgManager)
+	web.RegisterHandlers(mainCtx, adminMux, cfgManager)
 
 	adminAddr := getEnv("ADMIN_ADDR", ":2112")
 	adminSrv := &http.Server{

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -49,7 +51,10 @@ var rootCmd = &cobra.Command{
 
 func Execute() error {
 	buildCustomHelpTemplate()
-	return rootCmd.Execute()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func init() {
@@ -112,7 +117,8 @@ func setupEnvironment() {
 	cf, err := loadConfigFile(configPath)
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: cannot load profile registry (%s): %v\n", configPath, err); os.Exit(1)
+		fmt.Fprintf(os.Stderr, "ERROR: cannot load profile registry (%s): %v\n", configPath, err)
+		os.Exit(1)
 	}
 
 	active := cf.CurrentContext

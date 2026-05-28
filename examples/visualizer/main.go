@@ -64,12 +64,17 @@ func main() {
 	fmt.Print(C_Startup)
 
 	mgr := config.NewManager(cfg)
-	config.WatchConfig("pastaay.yaml", mgr.Update)
+	if stop, werr := config.WatchConfig("pastaay.yaml", mgr.Update); werr == nil {
+		defer stop()
+	}
 
 	go func() {
-		lis, _ := net.Listen("tcp", ":50051")
+		lis, err := net.Listen("tcp", ":50051")
+		if err != nil {
+			return
+		}
 		s := grpc.NewServer(grpc.UnaryInterceptor(grpcchaos.UnaryInterceptor(mgr)))
-		s.Serve(lis)
+		_ = s.Serve(lis)
 	}()
 
 	state := &ProbeState{}
