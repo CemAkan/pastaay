@@ -158,7 +158,7 @@ window.sendOraclePrompt = function() {
     chat.scrollTop = chat.scrollHeight;
 
     const ctx = typeof window.currentRawYaml !== 'undefined' ? `YAML:\n${window.currentRawYaml}\nMETRICS:\n${JSON.stringify(window.lastMetrics)}` : "Context dry";
-    const authToken = document.getElementById('webhook-token')?.value || localStorage.getItem('pastaay_token') || '';
+    const authToken = document.getElementById('webhook-token')?.value || sessionStorage.getItem('pastaay_token') || '';
 
     fetch('/console/api/oracle', { method: 'POST', headers: { 'Content-Type': 'application/json','X-Pastaay-Token': authToken }, body: JSON.stringify({ provider, key, model, intensity, prompt: queryText, context: ctx }) })
         .then(r => r.json()).then(data => {

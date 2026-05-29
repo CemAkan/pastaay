@@ -1,8 +1,10 @@
 export const API = {
-    // token reader
-    getToken: () => document.getElementById('webhook-token')?.value || '',
+    // token reader: DOM input first, sessionStorage fallback (cleared on tab close)
+    getToken: () => document.getElementById('webhook-token')?.value || sessionStorage.getItem('pastaay_token') || '',
 
-    fetchMetrics: () => fetch('/console/api/metrics').then(r => r.ok ? r.json() : []),
+    fetchMetrics: () => fetch('/console/api/metrics', {
+        headers: { 'X-Pastaay-Token': API.getToken() }
+    }).then(r => r.ok ? r.json() : []),
 
     fetchState: function() {
         return fetch('/console/api/state', {

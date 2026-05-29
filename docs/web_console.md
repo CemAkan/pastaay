@@ -196,12 +196,12 @@ Current engine config and Prometheus metrics are injected as context for context
 
 ## 5. API Reference
 
-All endpoints under `/console/api/`. Authenticated endpoints require `X-Pastaay-Token` (verified via `ConstantTimeCompare`).
+All endpoints under `/console/api/`. Authenticated endpoints require `X-Pastaay-Token` (verified via `ConstantTimeCompare`). The dashboard includes a token input field that persists to `sessionStorage` (cleared when tab is closed). Enter your token once, the browser sends it on every subsequent request — including from the builder page.
 
 | Endpoint | Method | Auth | Description |
 |:---|:---|:---|:---|
 | `/console/api/state` | GET | Token | Engine state, active policies, sensor status, logs snapshot |
-| `/console/api/metrics` | GET | No | Prometheus `pastaay_injected_faults_total` time-series |
+| `/console/api/metrics` | GET | Token | Prometheus `pastaay_injected_faults_total` time-series |
 | `/console/api/probe` | POST | Token | Server-side URL probe -- `{url}`, returns `{status, elapsed_ms, error}` |
 | `/console/api/plan` | POST | Token | Validate YAML through the security guard linter |
 | `/console/api/oracle` | POST | Token | AI SRE Copilot -- generate chaos configs from natural language |

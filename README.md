@@ -50,6 +50,8 @@ To enable tracing, configure the following environment variable on your host app
 | Environment Variable | Description | Example |
 | :--- | :--- | :--- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | The gRPC endpoint of your OTel Collector. If left empty, tracing safely defaults to a zero overhead `No-Op` mode. | `http://otel-collector:4317` |
+| `PASTAAY_WEBHOOK_TOKEN` | Shared secret for webhook API and web console. When set, all `/console/api/*` and `/chaos/webhook` routes require `X-Pastaay-Token` header. | `my-secret-token` |
+| `PASTAAY_DEV_ALLOW_NO_TOKEN` | Set to `1` to skip token auth on protected routes. Only for local development. Never set in production. | `1` |
 
 ### The Zero overhead Guarantee
 Pastaay utilizes OpenTelemetry's `BatchSpanProcessor`. This means chaos spans are flushed asynchronously. Even if your tracing backend (like Jaeger or Zipkin) goes offline, experiences severe latency, or is overwhelmed by trace volume, Pastaay will **never block your application's critical path** or leak goroutines.

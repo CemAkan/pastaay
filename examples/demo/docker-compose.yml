@@ -19,6 +19,7 @@ services:
       - KAFKA_ADDR=redpanda:9092
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - PASTAAY_DEV_ALLOW_NO_TOKEN=1
     volumes:
       - ./:/root/config/
     depends_on:

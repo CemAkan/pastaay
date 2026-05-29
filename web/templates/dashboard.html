@@ -25,6 +25,9 @@
         </div>
 
         <div class="flex gap-3 items-center">
+            <input type="password" id="webhook-token" placeholder="Auth Token" autocomplete="off"
+                class="w-28 text-xs font-mono bg-transparent border border-[#30363d] rounded px-2 py-2 text-slate-400 placeholder-slate-600 outline-none focus:border-[#56a4ff] transition-colors"
+                oninput="sessionStorage.setItem('pastaay_token', this.value)">
             <div class="relative inline-block text-left">
                 <button onclick="window.toggleAddPanel()" class="text-xs font-mono text-sky-200 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 px-4 py-2 rounded transition-colors shadow-sm font-medium focus:outline-none">
                     + Add Panel

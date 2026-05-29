@@ -188,7 +188,7 @@ const BuilderEngine = (function () {
             renderUI();
         }).catch(err => console.warn('State fetch failed, using defaults:', err));
 
-        fetch('/console/api/discover').then(r => r.json()).then(t => {
+        fetch('/console/api/discover', { headers: { 'X-Pastaay-Token': API.getToken() } }).then(r => r.json()).then(t => {
             const list = document.getElementById('discovered-targets');
             if (Array.isArray(t) && list) {
                 list.innerHTML = t.map(x => `<option value="${x}">`).join('');
@@ -315,7 +315,7 @@ const BuilderEngine = (function () {
     // Deploy / rollback
     const deployToEngine = async (btn) => {
         if (!btn) return;
-        const token = document.getElementById('webhook-token')?.value || '';
+        const token = document.getElementById('webhook-token')?.value || sessionStorage.getItem('pastaay_token') || '';
         const orig = btn.innerHTML;
         const baseCls = 'bg-[#2c2f36] hover:bg-[#30363d] border border-[#30363d] text-white px-5 py-1.5 rounded text-[11px] font-mono font-bold tracking-widest shadow-sm';
 
