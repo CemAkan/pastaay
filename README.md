@@ -244,6 +244,16 @@ Please read the [Contributing Guide](CONTRIBUTING.md) for detailed instructions 
 
 Pastaay is open source software licensed under the [MIT License](LICENSE).
 
+---
+
+## Read the Deep Dive
+
+[I Built a Chaos Engine That Goes Where No Tool Has Gone Before](https://medium.com/@cemakan/i-built-a-chaos-engineering-engine-that-goes-where-no-tool-has-gone-before-65d88fb141f3)
+
+16 sections covering every interceptor, the watcher, the guard, the Oracle prompt engineering, and the production bugs I hit along the way.
+
+---
+
 <br>
 
 <p align="center">
