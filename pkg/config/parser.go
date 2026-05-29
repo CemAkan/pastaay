@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -12,17 +13,18 @@ const maxConfigFileBytes = 5 << 20 // 5 MiB
 
 // LoadConfig reads, sanitizes, and validates the YAML configuration file.
 func LoadConfig(filePath string) (*PastaayConfig, error) {
-	fi, err := os.Stat(filePath)
+	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	if fi.Size() > maxConfigFileBytes {
-		return nil, fmt.Errorf("config file %s is %d bytes — exceeds limit of %d", filePath, fi.Size(), maxConfigFileBytes)
-	}
+	defer f.Close()
 
-	file, err := os.ReadFile(filePath)
+	file, err := io.ReadAll(io.LimitReader(f, maxConfigFileBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(file)) > maxConfigFileBytes {
+		return nil, fmt.Errorf("config file %s exceeds %d byte ceiling", filePath, maxConfigFileBytes)
 	}
 
 	if hasSuspiciousYAMLAlias(file) {

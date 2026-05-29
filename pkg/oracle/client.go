@@ -16,12 +16,15 @@ import (
 const (
 	maxLLMResponseBytes = 4 << 20
 	defaultLLMTimeout   = 30 * time.Second
+	userAgent           = "pastaay-oracle/2.0"
 )
 
 var sharedLLMClient = &http.Client{Timeout: defaultLLMTimeout}
 
 func AskOracle(provider, key, model, intensity, userPrompt, sysContext string) (string, error) {
-	return AskOracleCtx(context.Background(), provider, key, model, intensity, userPrompt, sysContext)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultLLMTimeout)
+	defer cancel()
+	return AskOracleCtx(ctx, provider, key, model, intensity, userPrompt, sysContext)
 }
 
 func AskOracleCtx(ctx context.Context, provider, key, model, intensity, userPrompt, sysContext string) (string, error) {
@@ -112,6 +115,7 @@ func buildJSONRequest(ctx context.Context, method, url string, payload interface
 		return nil, fmt.Errorf("request build: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 	return req, nil
 }
 
@@ -148,8 +152,6 @@ func callLLM(ctx context.Context, apiKey, model, url, sysPrompt, userPrompt, pro
 }
 
 func callGemini(ctx context.Context, apiKey, model, sysPrompt, userPrompt string) (string, error) {
-	// Pass the key via x-goog-api-key header, NOT as a URL query parameter,
-	// so that intermediate logs and OTel HTTP middleware do not capture it.
 	url := "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"
 	payload := map[string]interface{}{
 		"system_instruction": map[string]interface{}{"parts": map[string]string{"text": sysPrompt}},
@@ -236,10 +238,13 @@ func executeRequest(req *http.Request, provider string, parser func([]byte) (str
 	return text, nil
 }
 
-// truncate rounds to a UTF-8 boundary so we never split a multi-byte codepoint.
+// truncate rounds to a UTF-8 boundary. n<=0 returns only the marker.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	if n <= 0 {
+		return "...(truncated)"
 	}
 	cut := n
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
@@ -248,15 +253,31 @@ func truncate(s string, n int) string {
 	return s[:cut] + "...(truncated)"
 }
 
+// ExtractYAML scans the response for ```yaml or ```yml fences
 func ExtractYAML(response string) string {
-	start := strings.Index(response, "```yaml")
-	if start == -1 {
-		return ""
+	for i := 0; i+2 < len(response); i++ {
+		if response[i] != '`' || response[i+1] != '`' || response[i+2] != '`' {
+			continue
+		}
+		rest := response[i+3:]
+		var fenceLen int
+		switch {
+		case len(rest) >= 4 && strings.EqualFold(rest[:4], "yaml"):
+			fenceLen = 4
+		case len(rest) >= 3 && strings.EqualFold(rest[:3], "yml"):
+			fenceLen = 3
+		default:
+			continue
+		}
+		start := i + 3 + fenceLen
+		if start > len(response) {
+			return ""
+		}
+		end := strings.Index(response[start:], "```")
+		if end == -1 {
+			return ""
+		}
+		return strings.TrimSpace(response[start : start+end])
 	}
-	start += 7
-	end := strings.Index(response[start:], "```")
-	if end == -1 {
-		return ""
-	}
-	return strings.TrimSpace(response[start : start+end])
+	return ""
 }

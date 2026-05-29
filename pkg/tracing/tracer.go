@@ -60,7 +60,7 @@ func InitProvider(ctx context.Context, endpoint string) (func(context.Context) e
 	return tp.Shutdown, nil
 }
 
-// StartChaosSpan creates an OpenTelemetry span tagged with the fault target and type, used by every chaos injection point in the engine.
+// StartChaosSpan creates an OTel span tagged with fault target and type.
 
 func StartChaosSpan(ctx context.Context, operation string, target string, faultType string) (context.Context, trace.Span) {
 	tracer := otel.Tracer(tracerName)

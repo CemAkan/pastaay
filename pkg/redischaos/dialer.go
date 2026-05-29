@@ -14,7 +14,7 @@ import (
 
 type DialerFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
-// NewChaosDialer returns a dialer that may refuse to establish a connection when an active policy has drop_connection enabled.
+// NewChaosDialer returns a dialer that enforces drop_connection policies.
 func NewChaosDialer(mgr *config.Manager, baseDialer DialerFunc) DialerFunc {
 	if baseDialer == nil {
 		d := &net.Dialer{Timeout: 5 * time.Second}

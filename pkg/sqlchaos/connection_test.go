@@ -32,6 +32,7 @@ func (m *MockStmt) Query(args []driver.Value) (driver.Rows, error)  { return nil
 func TestWordBoundaryMatch(t *testing.T) {
 	updateRegex := regexp.MustCompile(`(?i)\bUPDATE\b`)
 	mgr := config.NewManager(&config.PastaayConfig{
+		Version: 1,
 		Policies: []config.Policy{
 			{
 				Type:          "sql",
@@ -63,6 +64,7 @@ func TestWordBoundaryMatch(t *testing.T) {
 // TestDoubleChaosPrevention verifies the Fallback Shield (chaosKey)
 func TestDoubleChaosPrevention(t *testing.T) {
 	mgr := config.NewManager(&config.PastaayConfig{
+		Version: 1,
 		Policies: []config.Policy{
 			{
 				Type:        "sql",
@@ -93,12 +95,13 @@ func TestDoubleChaosPrevention(t *testing.T) {
 // TestLatencyContextAwareness ensures delays are cancelled when context is done
 func TestLatencyContextAwareness(t *testing.T) {
 	mgr := config.NewManager(&config.PastaayConfig{
+		Version: 1,
 		Policies: []config.Policy{
 			{
 				Type:            "sql",
 				Target:          "all",
 				LatencyChance:   1.0,
-				LatencyDuration: 1 * time.Hour,
+				LatencyDuration: 30 * time.Minute,
 			},
 		},
 	})

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 const (
 	maxAPIRequestBytes = 1 << 20 // 1 MiB
 	probeTimeout       = 5 * time.Second
+	probeMaxBodyBytes  = 4096
 )
 
 var (
@@ -42,7 +44,25 @@ var (
 	allowedProvs = map[string]bool{"openai": true, "deepseek": true, "gemini": true, "anthropic": true}
 )
 
+// providerKey returns the API key for the given provider from env.
+func providerKey(provider string) string {
+	switch strings.ToLower(provider) {
+	case "openai":
+		return os.Getenv("PASTAAY_OPENAI_KEY")
+	case "deepseek":
+		return os.Getenv("PASTAAY_DEEPSEEK_KEY")
+	case "gemini":
+		return os.Getenv("PASTAAY_GEMINI_KEY")
+	case "anthropic":
+		return os.Getenv("PASTAAY_ANTHROPIC_KEY")
+	}
+	return ""
+}
+
 func emitLocal(name, msg string) { telemetry.Emit("local", name, msg) }
+
+// kubeLogScannerMaxBytes is the max line length for K8s log streams (1 MiB).
+const kubeLogScannerMaxBytes = 1 << 20
 
 func startKubeLogStreamer(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName string) {
 	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{Follow: true})
@@ -54,6 +74,7 @@ func startKubeLogStreamer(ctx context.Context, clientset *kubernetes.Clientset, 
 	defer stream.Close()
 
 	scanner := bufio.NewScanner(stream)
+	scanner.Buffer(make([]byte, 0, 64*1024), kubeLogScannerMaxBytes)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -61,6 +82,9 @@ func startKubeLogStreamer(ctx context.Context, clientset *kubernetes.Clientset, 
 		default:
 		}
 		telemetry.Emit("kube", podName, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[Pastaay-K8s] scanner closed for %s: %v", podName, err)
 	}
 }
 
@@ -70,14 +94,19 @@ func watchAndStreamPods(ctx context.Context, clientset *kubernetes.Clientset, na
 	activeStreams := make(map[string]context.CancelFunc)
 	var mu sync.Mutex
 
+	stopAll := func() {
+		mu.Lock()
+		for _, cancel := range activeStreams {
+			cancel()
+		}
+		activeStreams = make(map[string]context.CancelFunc)
+		mu.Unlock()
+	}
+
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
-			mu.Lock()
-			for _, cancel := range activeStreams {
-				cancel()
-			}
-			mu.Unlock()
+			stopAll()
 			return
 		}
 
@@ -87,6 +116,7 @@ func watchAndStreamPods(ctx context.Context, clientset *kubernetes.Clientset, na
 			emitLocal("kube-watcher", "watch failed: "+err.Error())
 			select {
 			case <-ctx.Done():
+				stopAll()
 				return
 			case <-time.After(backoff):
 			}
@@ -101,40 +131,65 @@ func watchAndStreamPods(ctx context.Context, clientset *kubernetes.Clientset, na
 		for event := range w.ResultChan() {
 			pod, ok := event.Object.(*corev1.Pod)
 			if !ok {
+				// Call w.Stop outside the mutex to avoid deadlocking client-go.
+				if event.Type == watch.Error {
+					w.Stop()
+				}
 				continue
 			}
-			mu.Lock()
 			switch event.Type {
 			case watch.Added, watch.Modified:
 				if pod.Status.Phase == corev1.PodRunning {
+					mu.Lock()
 					if _, exists := activeStreams[pod.Name]; !exists {
 						streamCtx, cancel := context.WithCancel(ctx)
 						activeStreams[pod.Name] = cancel
 						emitLocal("kube-watcher", "attaching stream to pod "+pod.Name)
 						go startKubeLogStreamer(streamCtx, clientset, namespace, pod.Name)
 					}
+					mu.Unlock()
 				}
 			case watch.Deleted:
+				mu.Lock()
 				if cancel, exists := activeStreams[pod.Name]; exists {
 					cancel()
 					delete(activeStreams, pod.Name)
 					emitLocal("kube-watcher", "detached stream from pod "+pod.Name)
 				}
+				mu.Unlock()
+			case watch.Error:
+				w.Stop()
 			}
-			mu.Unlock()
 		}
+		// When the watch channel closes (network blip, expired RV, etcd
+		// hiccup), we MUST tear down per-pod streams. Otherwise streamers
+		// keep tailing logs against the *old* connection's resource handles
+		// — and any pod that was deleted while the watch was down would
+		// never receive its cancel(). This loop reconnects with a fresh
+		// resource version and rebuilds streams via "Added" events.
+		stopAll()
 		log.Printf("[Pastaay-K8s] watch channel closed, reconnecting")
 		emitLocal("kube-watcher", "watch channel closed, reconnecting")
 	}
 }
 
-// requireConsoleToken enforces auth; in the empty-token mode it logs every
-// request to ensure the security gap is loud.
+// requireConsoleToken enforces auth.
 func requireConsoleToken(expected string, next http.HandlerFunc) http.HandlerFunc {
 	disabled := expected == ""
+	devAllow := os.Getenv("PASTAAY_DEV_ALLOW_NO_TOKEN") == "1"
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Reject browser-driven CSRF
+		if r.Method == http.MethodPost && !isSameOriginOrJSON(r) {
+			http.Error(w, "forbidden (CSRF check failed)", http.StatusForbidden)
+			return
+		}
+
 		if disabled {
-			log.Printf("[Pastaay-Console] SECURITY: unauthenticated %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+			if !devAllow {
+				http.Error(w, "engine token not configured: refusing to serve protected route", http.StatusServiceUnavailable)
+				return
+			}
+			log.Printf("[Pastaay-Console] DEV: unauthenticated %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 			next(w, r)
 			return
 		}
@@ -147,6 +202,29 @@ func requireConsoleToken(expected string, next http.HandlerFunc) http.HandlerFun
 	}
 }
 
+// isSameOriginOrJSON validates Origin/Referer/Content-Type for form requests.
+func isSameOriginOrJSON(r *http.Request) bool {
+	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0]))
+	if ct == "application/json" || ct == "application/yaml" || ct == "application/x-yaml" {
+		return true
+	}
+	host := r.Host
+	if o := r.Header.Get("Origin"); o != "" {
+		if u, err := url.Parse(o); err == nil && strings.EqualFold(u.Host, host) {
+			return true
+		}
+		return false
+	}
+	if rfr := r.Header.Get("Referer"); rfr != "" {
+		if u, err := url.Parse(rfr); err == nil && strings.EqualFold(u.Host, host) {
+			return true
+		}
+		return false
+	}
+	// No Origin/Referer
+	return false
+}
+
 func renderHTML(tmpl *template.Template, w http.ResponseWriter, page string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.ExecuteTemplate(w, "layout.html", map[string]string{"Page": page}); err != nil {
@@ -154,15 +232,14 @@ func renderHTML(tmpl *template.Template, w http.ResponseWriter, page string) {
 	}
 }
 
-// handleOracle delegates to the configured LLM provider, validates the modeln// name against a regex allow‑list, and returns the generated YAML blueprint.
-
+// handleOracle proxies AI requests using server-side keys.
 func handleOracle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var req struct {
-		Provider, Key, Model, Intensity, Prompt, Context string
+		Provider, Model, Intensity, Prompt, Context string
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxAPIRequestBytes)).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -170,7 +247,7 @@ func handleOracle(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	if !allowedProvs[req.Provider] {
+	if !allowedProvs[strings.ToLower(req.Provider)] {
 		http.Error(w, "unsupported provider", http.StatusBadRequest)
 		return
 	}
@@ -179,8 +256,14 @@ func handleOracle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	apiKey := providerKey(req.Provider)
+	if apiKey == "" {
+		http.Error(w, "provider not configured on engine", http.StatusServiceUnavailable)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	resp, err := oracle.AskOracle(req.Provider, req.Key, req.Model, req.Intensity, req.Prompt, req.Context)
+	resp, err := oracle.AskOracleCtx(r.Context(), req.Provider, apiKey, req.Model, req.Intensity, req.Prompt, req.Context)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -231,7 +314,7 @@ func handleState(mgr *config.Manager) http.HandlerFunc {
 		}
 
 		activePolicies := 0
-		var policies []config.Policy = []config.Policy{}
+		var policies = []config.Policy{}
 
 		if cfg != nil {
 			activePolicies = len(cfg.Policies)
@@ -294,37 +377,6 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(metricsList)
 }
 
-// safeProbeTransport rejects connections to private / loopback / link-local /
-// multicast / unspecified ranges and refuses any redirect.
-var safeProbeTransport = &http.Transport{
-	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
-		if err != nil {
-			return nil, err
-		}
-		for _, ip := range ips {
-			if isInternalIP(ip.IP) {
-				return nil, fmt.Errorf("pastaay: refused to dial internal address %s", ip.IP)
-			}
-		}
-		d := &net.Dialer{Timeout: 3 * time.Second}
-		return d.DialContext(ctx, network, addr)
-	},
-	ResponseHeaderTimeout: probeTimeout,
-}
-
-var safeProbeClient = &http.Client{
-	Transport: safeProbeTransport,
-	Timeout:   probeTimeout,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		return errors.New("pastaay: redirects are disabled for probe targets")
-	},
-}
-
 func isInternalIP(ip net.IP) bool {
 	if ip == nil {
 		return true
@@ -333,8 +385,6 @@ func isInternalIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 		return true
 	}
-	// IPv4: AWS/GCP/Azure metadata (169.254.169.254 caught by IsLinkLocal),
-	// shared address space (100.64.0.0/10).
 	if v4 := ip.To4(); v4 != nil {
 		if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
 			return true
@@ -343,7 +393,26 @@ func isInternalIP(ip net.IP) bool {
 	return false
 }
 
-// handleProbe performs an HTTP GET against a user‑supplied URL through an// hardened transport that refuses connections to internal/loopback addresses.
+// safeProbeClient is a per-request constructor
+func newSafeProbeClient(ip net.IP, port string) *http.Client {
+	pinned := net.JoinHostPort(ip.String(), port)
+	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			// Ignore the caller-supplied addr and dial the pinned IP instead.
+			return dialer.DialContext(ctx, network, pinned)
+		},
+		ResponseHeaderTimeout: probeTimeout,
+		DisableKeepAlives:     true,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   probeTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return errors.New("pastaay: redirects are disabled for probe targets")
+		},
+	}
+}
 
 func handleProbe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -370,11 +439,43 @@ func handleProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+
 	result := map[string]interface{}{}
 	w.Header().Set("Content-Type", "application/json")
 
 	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
 	defer cancel()
+
+	// Single resolution pass — pick the first public IP.
+	ips, lerr := (&net.Resolver{}).LookupIPAddr(ctx, host)
+	if lerr != nil || len(ips) == 0 {
+		result["status"] = 0
+		result["error"] = fmt.Sprintf("dns resolve: %v", lerr)
+		_ = json.NewEncoder(w).Encode(result)
+		return
+	}
+	var pinned net.IP
+	for _, ip := range ips {
+		if !isInternalIP(ip.IP) {
+			pinned = ip.IP
+			break
+		}
+	}
+	if pinned == nil {
+		result["status"] = 0
+		result["error"] = "pastaay: refused to dial only-internal hostname"
+		_ = json.NewEncoder(w).Encode(result)
+		return
+	}
 
 	probeReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
 	if err != nil {
@@ -384,8 +485,11 @@ func handleProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := newSafeProbeClient(pinned, port)
+	defer client.CloseIdleConnections()
+
 	start := time.Now()
-	resp, err := safeProbeClient.Do(probeReq)
+	resp, err := client.Do(probeReq)
 	elapsed := time.Since(start).Milliseconds()
 	result["elapsed_ms"] = elapsed
 
@@ -396,8 +500,7 @@ func handleProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	// Drain at most 4 KiB so we never load attacker bodies.
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, probeMaxBodyBytes))
 
 	result["status"] = resp.StatusCode
 	result["error"] = nil
@@ -431,13 +534,14 @@ func handleDiscover(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(targetList)
 }
 
-func RegisterHandlers(mux *http.ServeMux, mgr *config.Manager) {
+// RegisterHandlers wires console + admin API routes onto mux.
+func RegisterHandlers(ctx context.Context, mux *http.ServeMux, mgr *config.Manager) {
 	adminToken := os.Getenv("PASTAAY_WEBHOOK_TOKEN")
 
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 		if restConfig, err := rest.InClusterConfig(); err == nil {
 			if clientset, csErr := kubernetes.NewForConfig(restConfig); csErr == nil {
-				go watchAndStreamPods(context.Background(), clientset, getEnv("PASTAAY_K8S_NAMESPACE", "default"))
+				go watchAndStreamPods(ctx, clientset, getEnv("PASTAAY_K8S_NAMESPACE", "default"))
 			}
 		}
 	}
@@ -450,7 +554,7 @@ func RegisterHandlers(mux *http.ServeMux, mgr *config.Manager) {
 	mux.HandleFunc("/console/docs", func(w http.ResponseWriter, r *http.Request) { renderHTML(tmpl, w, "docs") })
 	mux.HandleFunc("/console/builder", func(w http.ResponseWriter, r *http.Request) { renderHTML(tmpl, w, "builder") })
 
-	mux.HandleFunc("/console/api/metrics", handleMetrics)
+	mux.HandleFunc("/console/api/metrics", requireConsoleToken(adminToken, handleMetrics))
 	mux.HandleFunc("/console/api/state", requireConsoleToken(adminToken, handleState(mgr)))
 	mux.HandleFunc("/console/api/probe", requireConsoleToken(adminToken, handleProbe))
 	mux.HandleFunc("/console/api/discover", requireConsoleToken(adminToken, handleDiscover))

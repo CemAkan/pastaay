@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v2.3.0-stable.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v2.3.1-stable.svg" alt="Release">
   <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
@@ -195,7 +195,7 @@ func main() {
 make -C operator install
 
 # Deploy the operator to your cluster
-make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.3.0
+make -C operator deploy IMG=<your-registry>/pastaay-operator:v2.3.1
 ```
 
 ---

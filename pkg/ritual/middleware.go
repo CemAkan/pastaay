@@ -27,44 +27,25 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 					continue
 				}
 
-				metricTag := p.MetricTag
+				latencyHit := p.LatencyChance > 0 && rand.Float64() < p.LatencyChance
+				errorHit := p.ErrorChance > 0 && rand.Float64() < p.ErrorChance
 
-				if p.LatencyChance > 0 && rand.Float64() < p.LatencyChance {
-					metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "latency").Inc()
-					ctx, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.latency", p.Target, "latency")
-
-					telemetry.EmitInfo("http", "HTTP Latency Injected", map[string]interface{}{"duration": p.LatencyDuration.String(), "target": p.Target}, span)
-
-					timer := time.NewTimer(p.LatencyDuration)
-					select {
-					case <-timer.C:
-						span.End()
-					case <-ctx.Done():
-						timer.Stop()
-						span.End()
-						w.WriteHeader(499)
-						return
-					}
+				if latencyHit && errorHit {
+					// Tie-break
+					latencyHit = false
 				}
 
-				if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
-					metrics.InjectedFaultsTotal.WithLabelValues(metricTag, "error").Inc()
-					_, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.error", p.Target, "error")
-					defer span.End()
-
-					status := p.ErrorCode
-					if status == 0 {
-						status = http.StatusInternalServerError
+				if latencyHit {
+					if injectLatency(w, r, p) {
+						// Client disconnected during latency
+						return
 					}
+					// Latency injected
+					continue
+				}
 
-					telemetry.EmitError("http", p.Target, "HTTP Fault Injected", p.ErrorBody, span)
-
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(status)
-
-					if p.ErrorBody != "" {
-						_, _ = io.WriteString(w, p.ErrorBody)
-					}
+				if errorHit {
+					injectError(w, r, p)
 					return
 				}
 			}
@@ -73,7 +54,50 @@ func Middleware(mgr *config.Manager) func(http.Handler) http.Handler {
 	}
 }
 
-// matchPath checks whether reqPath is covered by the policy, handling exact matches, wildcards (target ending with *), and the "all" sentinel.
+// injectLatency blocks for the policy duration or until ctx is done.
+func injectLatency(w http.ResponseWriter, r *http.Request, p *config.Policy) bool {
+	metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "latency").Inc()
+	ctx, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.latency", p.Target, "latency")
+	defer span.End()
+
+	telemetry.EmitInfo("http", "HTTP Latency Injected", map[string]interface{}{
+		"duration": p.LatencyDuration.String(),
+		"target":   p.Target,
+	}, span)
+
+	timer := time.NewTimer(p.LatencyDuration)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		// Nginx-style "client closed request" status.
+		w.WriteHeader(499)
+		return true
+	}
+}
+
+func injectError(w http.ResponseWriter, r *http.Request, p *config.Policy) {
+	metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "error").Inc()
+	_, span := tracing.StartChaosSpan(r.Context(), "pastaay.http.error", p.Target, "error")
+	defer span.End()
+
+	status := p.ErrorCode
+	if status == 0 {
+		status = http.StatusInternalServerError
+	}
+
+	telemetry.EmitError("http", p.Target, "HTTP Fault Injected", p.ErrorBody, span)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if p.ErrorBody != "" {
+		_, _ = io.WriteString(w, p.ErrorBody)
+	}
+}
+
+// matchPath checks whether reqPath is covered by the policy.
 func matchPath(reqPath string, p *config.Policy) bool {
 	if strings.EqualFold(p.Target, "all") || strings.EqualFold(reqPath, p.Target) {
 		return true
