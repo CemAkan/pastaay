@@ -32,3 +32,4 @@ go.work.sum
 
 .DS_Store
 **/.DS_Store
+cmd/pastaayctl/pastaayctl

@@ -2,6 +2,7 @@ package redischaos
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/CemAkan/pastaay/pkg/config"
@@ -18,6 +19,7 @@ func (m *mockCmder) Name() string { return m.name }
 
 func TestRedisHook_ErrorInjection(t *testing.T) {
 	mgr := config.NewManager(&config.PastaayConfig{
+		Version: 1,
 		Policies: []config.Policy{
 			{
 				Type:        "redis",
@@ -33,7 +35,10 @@ func TestRedisHook_ErrorInjection(t *testing.T) {
 
 	err := processHook(context.Background(), &mockCmder{name: "get"})
 
-	if err != redis.Nil {
-		t.Errorf("expected redis.Nil error, got %v", err)
-	}
+		if err == nil {
+			t.Errorf("expected non-nil chaos error, got nil")
+		}
+		if !strings.Contains(err.Error(), "pastaay: synthetic redis fault") {
+			t.Errorf("expected synthetic fault, got %v", err)
+		}
 }

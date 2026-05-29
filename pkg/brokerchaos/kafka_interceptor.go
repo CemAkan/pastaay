@@ -1,6 +1,7 @@
 package brokerchaos
 
 import (
+	"bytes"
 	"context"
 	"time"
 
@@ -10,13 +11,18 @@ import (
 	"github.com/IBM/sarama"
 )
 
+// KafkaConsumerMiddleware wraps a Kafka consumer and applies chaos policies (latency, drop, synthetic errors) to incoming messages.
 type KafkaConsumerMiddleware struct {
 	evaluator Evaluator
 }
 
+// NewKafkaConsumerMiddleware creates a middleware backed by the given evaluator.
 func NewKafkaConsumerMiddleware(eval Evaluator) *KafkaConsumerMiddleware {
 	return &KafkaConsumerMiddleware{evaluator: eval}
 }
+
+// Intercept evaluates all active policies against the message. If the evaluator
+// decides to inject chaos, the appropriate fault is applied inline.
 
 func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.ConsumerMessage) (drop bool, err error) {
 	if msg == nil {
@@ -28,18 +34,10 @@ func (m *KafkaConsumerMiddleware) Intercept(ctx context.Context, msg *sarama.Con
 		Protocol:  ProtocolKafka,
 		Partition: msg.Partition,
 		GetHeader: func(key string) (string, bool) {
+			keyBytes := []byte(key)
 			for _, h := range msg.Headers {
-				if len(h.Key) == len(key) {
-					match := true
-					for i := 0; i < len(key); i++ {
-						if h.Key[i] != key[i] {
-							match = false
-							break
-						}
-					}
-					if match {
-						return string(h.Value), true
-					}
+				if bytes.Equal(h.Key, keyBytes) {
+					return string(h.Value), true
 				}
 			}
 			return "", false

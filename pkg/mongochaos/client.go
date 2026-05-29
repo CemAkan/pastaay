@@ -5,7 +5,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// ApplyChaos integrates Pastaay fault injection into MongoDB ClientOptions.
+// ApplyChaos integrates fault injection into MongoDB ClientOptions.
 func ApplyChaos(opts *options.ClientOptions, mgr *config.Manager) *options.ClientOptions {
 	if opts == nil {
 		opts = options.Client()

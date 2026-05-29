@@ -44,6 +44,7 @@ func (c *fallbackConnector) Connect(ctx context.Context) (driver.Conn, error) {
 }
 func (c *fallbackConnector) Driver() driver.Driver { return c.driver }
 
+// OpenConnector returns a chaos-aware connector or falls back to a compat wrapper.
 func (d *WrapperDriver) OpenConnector(name string) (driver.Connector, error) {
 	if dc, ok := d.original.(driver.DriverContext); ok {
 		connector, err := dc.OpenConnector(name)
@@ -67,21 +68,32 @@ func (d *WrapperDriver) Open(name string) (driver.Conn, error) {
 }
 
 func applyConnectionChaos(ctx context.Context, mgr *config.Manager) error {
+	if mgr == nil {
+		return nil
+	}
 	policies := mgr.GetActivePolicies("sql")
 	for _, p := range policies {
-		if p.DropConnection && (strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, "database")) {
-			chance := p.ErrorChance
-			if chance <= 0 {
-				chance = 1.0
-			}
-			if rand.Float64() < chance {
-				metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
-				_, span := tracing.StartChaosSpan(ctx, "pastaay.sql.drop", p.Target, "drop")
-				telemetry.EmitError("sql", p.Target, "Connection force dropped", "TCP stream severed by DropConnection policy", span)
-				span.End()
-				return errors.New("[Pastaay-SQL] Chaos: TCP connection forcefully dropped")
-			}
+		if !p.DropConnection {
+			continue
 		}
+		if !strings.EqualFold(p.Target, "all") && !strings.EqualFold(p.Target, "database") {
+			continue
+		}
+		chance := p.ErrorChance
+		if chance <= 0 {
+			chance = 1.0
+		}
+		if rand.Float64() >= chance {
+			continue
+		}
+
+		metrics.InjectedFaultsTotal.WithLabelValues(p.MetricTag, "drop").Inc()
+		// Defer span.End so any panic in telemetry.EmitError still closes the
+		// span and does not leak an active OTLP recording.
+		_, span := tracing.StartChaosSpan(ctx, "pastaay.sql.drop", p.Target, "drop")
+		defer span.End()
+		telemetry.EmitError("sql", p.Target, "Connection force dropped", "TCP stream severed by DropConnection policy", span)
+		return errors.New("[Pastaay-SQL] Chaos: TCP connection forcefully dropped")
 	}
 	return nil
 }

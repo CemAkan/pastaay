@@ -33,6 +33,9 @@ type k8sConfigMap struct {
 
 // WatchK8sConfigMap polls K8s API and reports health status to the Manager.
 func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.Duration, mgr *Manager) error {
+	if interval < time.Second {
+		interval = time.Second
+	}
 
 	_, err := os.ReadFile(k8sTokenPath)
 	if err != nil {
@@ -109,7 +112,7 @@ func WatchK8sConfigMap(ctx context.Context, cmName, cmKey string, interval time.
 				}
 
 				if resp.StatusCode != http.StatusOK {
-					io.Copy(io.Discard, resp.Body)
+					_, _ = io.Copy(io.Discard, resp.Body)
 					resp.Body.Close()
 					mgr.SetSensorStatus("k8s", fmt.Sprintf("http_%d", resp.StatusCode))
 					continue

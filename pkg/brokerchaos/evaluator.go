@@ -19,12 +19,19 @@ type defaultEvaluator struct {
 	provider ConfigProvider
 }
 
+// NewEvaluator panics on nil provider to fail at startup, not in production.
 func NewEvaluator(provider ConfigProvider) Evaluator {
+	if provider == nil {
+		panic("brokerchaos: NewEvaluator received nil ConfigProvider")
+	}
 	return &defaultEvaluator{provider: provider}
 }
 
 func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext) (bool, time.Duration, error, string, string) {
-	if msgCtx == nil || e.provider.IsCommandIgnored(string(msgCtx.Protocol), msgCtx.Topic) {
+	if e == nil || e.provider == nil || msgCtx == nil {
+		return false, 0, nil, "", ""
+	}
+	if e.provider.IsCommandIgnored(string(msgCtx.Protocol), msgCtx.Topic) {
 		return false, 0, nil, "", ""
 	}
 
@@ -60,12 +67,18 @@ func (e *defaultEvaluator) Evaluate(ctx context.Context, msgCtx *MessageContext)
 			}
 		}
 
-		if p.LatencyDuration > delayDuration && rand.Float64() < p.LatencyChance {
+		latencyHit := p.LatencyChance > 0 && rand.Float64() < p.LatencyChance
+		errorHit := p.ErrorChance > 0 && rand.Float64() < p.ErrorChance
+		if latencyHit && errorHit {
+			latencyHit = false
+		}
+
+		if latencyHit && p.LatencyDuration > delayDuration {
 			delayDuration = p.LatencyDuration
 			latencyTag = p.MetricTag
 		}
 
-		if p.ErrorChance > 0 && rand.Float64() < p.ErrorChance {
+		if errorHit {
 			errorTag = p.MetricTag
 			if p.DropConnection {
 				shouldDrop = true

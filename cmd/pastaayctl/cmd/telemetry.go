@@ -36,27 +36,31 @@ func init() {
 	rootCmd.AddCommand(topCmd, statusCmd, discoverCmd, inspectCmd)
 }
 
-// Logic Implementations
+// signalContext returns a context that cancels on SIGINT/SIGTERM.
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
 func runTop(cmd *cobra.Command, args []string) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signalContext()
 	defer stop()
 
 	if outputJSON {
 		resp, err := fetchMetrics(ctx)
 		if err != nil {
-			json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 		defer resp.Body.Close()
-		json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "metric_stream_active", "info": "use /metrics directly for json dump"})
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "metric_stream_active", "info": "use /metrics directly for json dump"})
 		return
 	}
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	fmt.Print("\033[?25l")       // Hide cursor
-	defer fmt.Print("\033[?25h") // Show cursor
+	fmt.Print("\033[?25l")
+	defer fmt.Print("\033[?25h")
 
 	lastFaults := make(map[string]int)
 
@@ -82,10 +86,13 @@ func runTop(cmd *cobra.Command, args []string) {
 }
 
 func runStatus(cmd *cobra.Command, args []string) {
-	resp, err := fetchMetrics(context.Background())
+	ctx, stop := signalContext()
+	defer stop()
+
+	resp, err := fetchMetrics(ctx)
 	if err != nil {
 		if outputJSON {
-			json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
 		} else {
 			fmt.Printf("%s[!] Failed to reach fleet: %v%s\n", cRed, err, cReset)
 		}
@@ -116,7 +123,7 @@ func runStatus(cmd *cobra.Command, args []string) {
 	}
 
 	if outputJSON {
-		json.NewEncoder(os.Stdout).Encode(data)
+		_ = json.NewEncoder(os.Stdout).Encode(data)
 		return
 	}
 
@@ -129,14 +136,17 @@ func runStatus(cmd *cobra.Command, args []string) {
 		}
 		fmt.Fprintf(w, "[%s]\t%s%s%s\t%s\n", cCyan+strings.ToUpper(d.Name)+cReset, color, d.Status, cReset, d.Endpoint)
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func runDiscover(cmd *cobra.Command, args []string) {
-	resp, err := fetchMetrics(context.Background())
+	ctx, stop := signalContext()
+	defer stop()
+
+	resp, err := fetchMetrics(ctx)
 	if err != nil {
 		if outputJSON {
-			json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
 		} else {
 			fmt.Printf("%s[!] Topology Discovery Failed: %v%s\n", cRed, err, cReset)
 		}
@@ -165,7 +175,7 @@ func runDiscover(cmd *cobra.Command, args []string) {
 	}
 
 	if outputJSON {
-		json.NewEncoder(os.Stdout).Encode(map[string]interface{}{"topology": targetList})
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]interface{}{"topology": targetList})
 		return
 	}
 
@@ -177,13 +187,23 @@ func runDiscover(cmd *cobra.Command, args []string) {
 }
 
 func runInspect(cmd *cobra.Command, args []string) {
-	url := strings.TrimSuffix(targetURL, "/metrics") + "/chaos/export"
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-	resp, err := telemetryClient.Do(req)
+	ctx, stop := signalContext()
+	defer stop()
 
+	url := strings.TrimSuffix(targetURL, "/metrics") + "/chaos/export"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		if outputJSON {
-			json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
+		} else {
+			fmt.Printf("%s[!] Bad target URL: %v%s\n", cRed, err, cReset)
+		}
+		return
+	}
+	resp, err := telemetryClient.Do(req)
+	if err != nil {
+		if outputJSON {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
 		} else {
 			fmt.Printf("%s[!] Target Unreachable: %v%s\n", cRed, err, cReset)
 		}
@@ -193,14 +213,22 @@ func runInspect(cmd *cobra.Command, args []string) {
 
 	if resp.StatusCode != http.StatusOK {
 		if outputJSON {
-			json.NewEncoder(os.Stdout).Encode(map[string]string{"error": fmt.Sprintf("Server returned %d", resp.StatusCode)})
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": fmt.Sprintf("Server returned %d", resp.StatusCode)})
 		} else {
 			fmt.Printf("%s[!] Inspect Failed: Server returned HTTP %d%s\n", cRed, resp.StatusCode, cReset)
 		}
 		return
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		if outputJSON {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
+		} else {
+			fmt.Printf("%s[!] Read failed: %v%s\n", cRed, err, cReset)
+		}
+		return
+	}
 	if outputJSON {
 		fmt.Printf("%s\n", string(body))
 		return
@@ -208,7 +236,6 @@ func runInspect(cmd *cobra.Command, args []string) {
 	fmt.Printf("\n%s═══ ENGINE MEMORY X-RAY ═══%s\n%s%s%s\n", cBold+cGreen, cReset, cGray, string(body), cReset)
 }
 
-// Helpers
 func fetchMetrics(ctx context.Context) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
@@ -218,12 +245,12 @@ func fetchMetrics(ctx context.Context) (*http.Response, error) {
 }
 
 func drawOfflineScreen(msg string) {
-	fmt.Print("\033[H\033[2J") // Clear Screen
+	fmt.Print("\033[H\033[2J")
 	fmt.Printf("%s[!] FLEET CONNECTION SEVERED%s\nError: %s\n", cBold+cRed, cReset, msg)
 }
 
 func renderDashboard(resp *http.Response, lastFaults map[string]int) {
-	fmt.Print("\033[H\033[2J") // Clear Screen
+	fmt.Print("\033[H\033[2J")
 	fmt.Printf("%sPASTAAY%s KINETIC CONTROL PLANE %sv2.0-stable%s\n", cBold+cCyan, cReset, cGray, cReset)
 	fmt.Println(strings.Repeat("─", 85))
 	fmt.Printf("%-35s | %-15s | %-12s | %-10s\n", "TARGET (Endpoint/Query)", "FAULT TYPE", "TOTAL HITS", "RATE (req/s)")

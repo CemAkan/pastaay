@@ -33,7 +33,7 @@ var oracleCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(oracleCmd)
 	oracleCmd.Flags().StringVar(&aiProvider, "provider", "openai", "AI Provider (openai, deepseek, gemini, anthropic)")
-	oracleCmd.Flags().StringVar(&aiKey, "api-key", "", "API Key for the provider (falls back to PASTAAY_AI_KEY env var)")
+	oracleCmd.Flags().StringVar(&aiKey, "api-key", "", "API Key (DEPRECATED — use PASTAAY_AI_KEY env var. Refused unless PASTAAY_ALLOW_CLI_KEY=1)")
 	oracleCmd.Flags().StringVar(&oracleHealthURL, "health-url", "", "Custom health check URL for baseline latency calculation")
 	oracleCmd.Flags().StringVarP(&aiModel, "model", "m", "", "Specific AI model to use (falls back to provider default)")
 	oracleCmd.Flags().StringVar(&aiIntensity, "intensity", "high", "Chaos intensity level: low, medium, high, nuke")
@@ -52,17 +52,22 @@ func runOracle(cmd *cobra.Command, args []string) {
 	fmt.Printf("  %s[*] \"We're pushing the boundaries of all that is real and possible.\"%s\n", clrGray, clrReset)
 
 	apiKey := aiKey
-	if apiKey == "" {
+	if apiKey != "" {
+		if os.Getenv("PASTAAY_ALLOW_CLI_KEY") != "1" {
+			fmt.Printf("\n%s[!] Refusing --api-key (visible in `ps aux`). Set PASTAAY_AI_KEY env var, or PASTAAY_ALLOW_CLI_KEY=1 to override.%s\n", clrRed, clrReset)
+			os.Exit(1)
+		}
+		fmt.Printf("  %s[!] WARNING: API key via --api-key is visible in `ps aux`.%s\n", clrYellow, clrReset)
+	} else {
 		apiKey = os.Getenv("PASTAAY_AI_KEY")
 	}
 	if apiKey == "" {
-		fmt.Printf("\n%s[!] Authentication Failed: No API key provided.%s\n", clrRed, clrReset)
+		fmt.Printf("\n%s[!] Authentication Failed: No API key provided (set PASTAAY_AI_KEY).%s\n", clrRed, clrReset)
 		os.Exit(1)
 	}
 
 	userPrompt := strings.Join(args, " ")
 
-	// Bounded context
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -88,7 +93,7 @@ func runOracle(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	response, err := oracle.AskOracle(provider, apiKey, modelToUse, aiIntensity, userPrompt, sysContext)
+	response, err := oracle.AskOracleCtx(ctx, provider, apiKey, modelToUse, aiIntensity, userPrompt, sysContext)
 	if err != nil {
 		fmt.Printf("\n%s[!] Oracle Link Severed: %v%s\n", clrRed, err, clrReset)
 		os.Exit(1)
@@ -119,7 +124,6 @@ func runOracle(cmd *cobra.Command, args []string) {
 	}
 }
 
-// gatherSystemContext fetches the live active-policy YAML from the engine /chaos/export endpoint.
 func gatherSystemContext(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("ACTIVE POLICIES (YAML):\n")

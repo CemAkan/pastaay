@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -67,18 +68,31 @@ func EmitError(protocol, target, msg, payload string, span trace.Span) {
 		logData["trace_id"] = span.SpanContext().TraceID().String()
 		logData["span_id"] = span.SpanContext().SpanID().String()
 	}
-	jsonLog, _ := json.Marshal(logData)
+	jsonLog, err := json.Marshal(logData)
+	if err != nil {
+		log.Printf("[Pastaay-Telemetry] EmitError marshal failed: %v", err)
+		return
+	}
 	Emit(nodeName, protocol, string(jsonLog))
 }
 
 func EmitInfo(protocol, message string, data map[string]interface{}, span trace.Span) {
-	data["level"] = "INFO"
-	data["protocol"] = protocol
-	data["message"] = message
-	if span != nil && span.SpanContext().IsValid() {
-		data["trace_id"] = span.SpanContext().TraceID().String()
-		data["span_id"] = span.SpanContext().SpanID().String()
+	// Avoid mutating the caller's map.
+	merged := make(map[string]interface{}, len(data)+5)
+	for k, v := range data {
+		merged[k] = v
 	}
-	jsonLog, _ := json.Marshal(data)
+	merged["level"] = "INFO"
+	merged["protocol"] = protocol
+	merged["message"] = message
+	if span != nil && span.SpanContext().IsValid() {
+		merged["trace_id"] = span.SpanContext().TraceID().String()
+		merged["span_id"] = span.SpanContext().SpanID().String()
+	}
+	jsonLog, err := json.Marshal(merged)
+	if err != nil {
+		log.Printf("[Pastaay-Telemetry] EmitInfo marshal failed: %v", err)
+		return
+	}
 	Emit(nodeName, protocol, string(jsonLog))
 }

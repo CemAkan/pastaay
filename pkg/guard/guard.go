@@ -3,6 +3,7 @@ package guard
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/CemAkan/pastaay/pkg/config"
@@ -37,12 +38,12 @@ func Analyze(cfg *config.PastaayConfig) PlanResult {
 		}
 
 		scopeWeight := 0.4
-		if p.Target == "all" || p.Target == "database" || p.Target == "*" || p.Target == "" {
+		if strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, "database") || p.Target == "*" || p.Target == "" {
 			scopeWeight = 1.0
 			res.Issues = append(res.Issues, fmt.Sprintf("[%s] Global Target: Exposes entire '%s' infrastructure layer.", p.Name, p.Type))
 		}
 
-		key := p.Type + ":" + p.Target
+		key := strings.ToLower(p.Type) + ":" + strings.ToLower(p.Target)
 		if orig, exists := targets[key]; exists {
 			res.Issues = append(res.Issues, fmt.Sprintf("[%s] Collision: Overlaps with '%s'. Cascading failure probability increased.", p.Name, orig))
 			scopeWeight = math.Min(1.0, scopeWeight+0.2)
@@ -94,6 +95,10 @@ func Analyze(cfg *config.PastaayConfig) PlanResult {
 		}
 
 		policyRisk := maxSeverity * scopeWeight
+
+		if policyRisk > 0.95 {
+			policyRisk = 0.95
+		}
 		systemSurvival *= (1.0 - policyRisk)
 	}
 

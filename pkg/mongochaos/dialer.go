@@ -18,7 +18,18 @@ type ChaosDialer struct {
 	Manager       *config.Manager
 }
 
+func (c *ChaosDialer) dialFallback(ctx context.Context, network, address string) (net.Conn, error) {
+	if c.DefaultDialer != nil {
+		return c.DefaultDialer.DialContext(ctx, network, address)
+	}
+	fallback := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return fallback.DialContext(ctx, network, address)
+}
+
 func (c *ChaosDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if c == nil || c.Manager == nil {
+		return c.dialFallback(ctx, network, address)
+	}
 	policies := c.Manager.GetActivePolicies("mongo")
 	for _, p := range policies {
 		if p.DropConnection && (strings.EqualFold(p.Target, "all") || strings.EqualFold(p.Target, "database")) {
@@ -32,10 +43,5 @@ func (c *ChaosDialer) DialContext(ctx context.Context, network, address string) 
 			}
 		}
 	}
-
-	if c.DefaultDialer != nil {
-		return c.DefaultDialer.DialContext(ctx, network, address)
-	}
-	fallback := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	return fallback.DialContext(ctx, network, address)
+	return c.dialFallback(ctx, network, address)
 }

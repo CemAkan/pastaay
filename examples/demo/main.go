@@ -80,8 +80,11 @@ func main() {
 		log.Fatalf("[FATAL] Core configuration load failure: %v", err)
 	}
 	cfgManager := config.NewManager(cfg)
-	if err := config.WatchConfig(cfgPath, cfgManager.Update); err != nil {
-		log.Printf("[WARN] config hot-reload watcher disabled: %v", err)
+	stopWatcher, werr := config.WatchConfig(cfgPath, cfgManager.Update)
+	if werr != nil {
+		log.Printf("[WARN] config hot-reload watcher disabled: %v", werr)
+	} else {
+		defer stopWatcher()
 	}
 
 	// Admin Server
@@ -96,12 +99,20 @@ func main() {
 	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(webhookToken, cfgManager.Update))
 	adminMux.HandleFunc("/chaos/export", config.ExportHandler(cfgManager))
 
-	web.RegisterHandlers(adminMux, cfgManager)
+	web.RegisterHandlers(mainCtx, adminMux, cfgManager)
 
 	adminAddr := getEnv("ADMIN_ADDR", ":2112")
+	adminSrv := &http.Server{
+		Addr:              adminAddr,
+		Handler:           adminMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	go func() {
 		log.Printf("[INFO] Pastaay Admin Server listening on %s", adminAddr)
-		if err := http.ListenAndServe(adminAddr, adminMux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := adminSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("[ERROR] Admin server crashed: %v", err)
 			stop()
 		}
@@ -169,10 +180,12 @@ func main() {
 	chaosHandler := ritual.Middleware(cfgManager)(mux)
 
 	srv := &http.Server{
-		Addr:         appAddr,
-		Handler:      chaosHandler,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:              appAddr,
+		Handler:           chaosHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Graceful Shutdown Orchestration
@@ -186,6 +199,9 @@ func main() {
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("[WARN] HTTP server shutdown: %v", err)
+		}
+		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("[WARN] Admin server shutdown: %v", err)
 		}
 
 		wg.Wait()
