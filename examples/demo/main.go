@@ -89,7 +89,7 @@ func main() {
 	adminMux.HandleFunc("/chaos/webhook", config.WebhookHandler(webhookToken, cfgManager.Update))
 	adminMux.HandleFunc("/chaos/export", config.ExportHandler(cfgManager))
 
-	web.RegisterHandlers(adminMux)
+	web.RegisterHandlers(adminMux, cfgManager)
 
 	go func() {
 		log.Println("[INFO] Pastaay Admin Server listening on :2112")
